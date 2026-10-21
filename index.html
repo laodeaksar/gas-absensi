@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="eduabsen">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Absensi Siswa</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- daisyUI 5 + Tailwind CSS v4 (browser build) -->
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Konfigurasi Tailwind v4: CSS-first, bukan lagi tailwind.config -->
+    <style type="text/tailwindcss">
+        @theme {
+            --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+        }
+    </style>
+
+    <style>
+        /* Tema kustom daisyUI (mempertahankan nuansa biru aplikasi lama) */
+        [data-theme="eduabsen"] {
+            color-scheme: light;
+            --color-base-100: oklch(100% 0 0);
+            --color-base-200: oklch(98.5% 0.002 247);
+            --color-base-300: oklch(93% 0.006 250);
+            --color-base-content: oklch(27% 0.03 257);
+            --color-primary: oklch(54% 0.21 262);
+            --color-primary-content: oklch(98% 0.01 262);
+            --color-secondary: oklch(55% 0.03 257);
+            --color-secondary-content: oklch(98% 0.005 257);
+            --color-accent: oklch(62% 0.17 255);
+            --color-accent-content: oklch(98% 0.01 255);
+            --color-neutral: oklch(37% 0.03 257);
+            --color-neutral-content: oklch(98% 0.005 257);
+            --color-info: oklch(62% 0.19 245);
+            --color-info-content: oklch(98% 0.01 245);
+            --color-success: oklch(64% 0.17 155);
+            --color-success-content: oklch(98% 0.02 155);
+            --color-warning: oklch(80% 0.16 80);
+            --color-warning-content: oklch(28% 0.07 80);
+            --color-error: oklch(60% 0.22 25);
+            --color-error-content: oklch(98% 0.01 25);
+            --radius-selector: 0.5rem;
+            --radius-field: 0.5rem;
+            --radius-box: 0.75rem;
+            --size-selector: 0.25rem;
+            --size-field: 0.25rem;
+            --border: 1px;
+            --depth: 0;
+            --noise: 0;
+        }
+
+        @media print {
+            body * { visibility: hidden; }
+            #print-area, #print-area * { visibility: visible; }
+            #print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 0 !important; background: white; overflow: visible !important; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            .shadow-sm { box-shadow: none !important; }
+        }
+    </style>
+</head>
+<body class="bg-base-200 text-base-content antialiased h-screen overflow-hidden">
+
+    <!-- Toast (daisyUI toast + alert) -->
+    <div id="toast-container" class="toast toast-end z-[9999] no-print"></div>
+
+    <!-- Global loader -->
+    <div id="global-loader" class="hidden fixed inset-0 z-[60] bg-base-100/80 no-print">
+        <div class="flex flex-col items-center justify-center h-full gap-4">
+            <span class="loading loading-spinner loading-xl text-primary"></span>
+            <p class="font-medium text-base-content/70">Memproses data...</p>
+        </div>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="view-login" class="hidden w-full h-full">
+        <div class="flex items-center justify-center w-full h-full bg-base-200 p-4">
+            <div class="card bg-base-100 shadow-xl w-full max-w-md">
+                <div class="card-body p-8">
+                    <div class="text-center mb-4">
+                        <div class="inline-flex items-center justify-center size-16 rounded-full bg-primary/10 text-primary mb-4"><i data-lucide="school" class="size-8"></i></div>
+                        <h1 class="text-2xl font-bold js-school-name">EduAbsen</h1>
+                        <p class="text-sm text-base-content/60 mt-1">Sistem Manajemen Kehadiran Siswa</p>
+                    </div>
+                    <form id="login-form" class="space-y-4" novalidate>
+                        <fieldset class="fieldset">
+                            <legend class="fieldset-legend">Username</legend>
+                            <label id="wrap-username" class="input w-full">
+                                <i data-lucide="user" class="size-4 opacity-50"></i>
+                                <input type="text" id="login-username" autocomplete="username" aria-invalid="false" aria-describedby="err-username" placeholder="Masukkan (siswa: NIS)">
+                            </label>
+                            <div id="err-username" class="hidden" role="alert">
+                                <p class="flex items-center gap-1 mt-1 text-xs text-error"><i data-lucide="circle-alert" class="size-3.5 shrink-0"></i><span></span></p>
+                            </div>
+                        </fieldset>
+                        <fieldset class="fieldset">
+                            <legend class="fieldset-legend">Password</legend>
+                            <label id="wrap-password" class="input w-full">
+                                <i data-lucide="lock" class="size-4 opacity-50"></i>
+                                <input type="password" id="login-password" autocomplete="current-password" aria-invalid="false" aria-describedby="err-password" placeholder="Masukkan password">
+                                <button type="button" id="btn-toggle-password" onclick="app.togglePassword()" aria-label="Tampilkan password" class="btn btn-ghost btn-xs btn-circle">
+                                    <span id="pw-icon-show"><i data-lucide="eye" class="size-4"></i></span>
+                                    <span id="pw-icon-hide" class="hidden"><i data-lucide="eye-off" class="size-4"></i></span>
+                                </button>
+                            </label>
+                            <div id="err-password" class="hidden" role="alert">
+                                <p class="flex items-center gap-1 mt-1 text-xs text-error"><i data-lucide="circle-alert" class="size-3.5 shrink-0"></i><span></span></p>
+                            </div>
+                        </fieldset>
+                        <button type="submit" id="btn-login" class="btn btn-primary w-full">Masuk</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP -->
+    <div id="view-app" class="hidden w-full h-full">
+        <div class="drawer lg:drawer-open h-full">
+            <input id="app-drawer" type="checkbox" class="drawer-toggle">
+
+            <div class="drawer-content flex flex-col h-full min-w-0 overflow-hidden">
+                <!-- Navbar mobile -->
+                <header class="navbar bg-base-100 border-b border-base-300 min-h-14 px-2 lg:hidden no-print">
+                    <label for="app-drawer" class="btn btn-ghost btn-square" aria-label="Buka menu"><i data-lucide="menu" class="size-6"></i></label>
+                    <div class="flex items-center gap-2 ml-1">
+                        <i data-lucide="school" class="size-5 text-primary"></i>
+                        <span class="font-bold js-school-name">EduAbsen</span>
+                    </div>
+                </header>
+
+                <div class="flex-1 overflow-y-auto p-4 md:p-6" id="print-area">
+
+                    <!-- DASHBOARD -->
+                    <div id="content-dashboard" class="view-content hidden space-y-6">
+                        <h2 class="text-2xl font-bold no-print">Dashboard Overview</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                            <div class="stats bg-base-100 border border-base-300">
+                                <div class="stat">
+                                    <div class="stat-figure text-primary"><div class="size-12 rounded-full bg-primary/10 flex items-center justify-center"><i data-lucide="users" class="size-6"></i></div></div>
+                                    <div class="stat-title">Total Siswa</div>
+                                    <div class="stat-value text-2xl" id="dash-total-siswa">-</div>
+                                </div>
+                            </div>
+                            <div class="stats bg-base-100 border border-base-300">
+                                <div class="stat">
+                                    <div class="stat-figure text-success"><div class="size-12 rounded-full bg-success/10 flex items-center justify-center"><i data-lucide="user-check" class="size-6"></i></div></div>
+                                    <div class="stat-title">Hadir Hari Ini</div>
+                                    <div class="stat-value text-2xl" id="dash-hadir">-</div>
+                                </div>
+                            </div>
+                            <div class="stats bg-base-100 border border-base-300">
+                                <div class="stat">
+                                    <div class="stat-figure text-warning"><div class="size-12 rounded-full bg-warning/10 flex items-center justify-center"><i data-lucide="thermometer" class="size-6"></i></div></div>
+                                    <div class="stat-title">Sakit / Izin</div>
+                                    <div class="stat-value text-2xl" id="dash-sakit-izin">-</div>
+                                </div>
+                            </div>
+                            <div class="stats bg-base-100 border border-base-300">
+                                <div class="stat">
+                                    <div class="stat-figure text-error"><div class="size-12 rounded-full bg-error/10 flex items-center justify-center"><i data-lucide="user-x" class="size-6"></i></div></div>
+                                    <div class="stat-title">Persentase Kehadiran</div>
+                                    <div class="stat-value text-2xl" id="dash-persentase">-%</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
+                            <div class="card bg-base-100 border border-base-300"><div class="card-body"><h3 class="card-title text-base">Tren Kehadiran (7 Hari Terakhir)</h3><canvas id="trendChart" height="250"></canvas></div></div>
+                            <div class="card bg-base-100 border border-base-300"><div class="card-body"><h3 class="card-title text-base">Ringkasan Hari Ini</h3><div class="flex justify-center"><div style="width: 250px;"><canvas id="pieChart"></canvas></div></div></div></div>
+                        </div>
+                    </div>
+
+                    <!-- MASTER STUDENTS -->
+                    <div id="content-students" class="view-content hidden space-y-4 no-print">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-2xl font-bold">Master Data Siswa</h2>
+                            <div class="flex gap-2">
+    <button onclick="app.generateStudentAccounts()" class="btn btn-outline btn-sm"><i data-lucide="key-round" class="size-4"></i> Buat Akun Siswa</button>
+    <button onclick="app.openStudentModal()" class="btn btn-primary btn-sm"><i data-lucide="plus" class="size-4"></i> Tambah Siswa</button>
+</div>
+                        </div>
+                        <div class="card bg-base-100 border border-base-300 overflow-hidden">
+                            <div class="p-4 border-b border-base-300 bg-base-200/60">
+                                <label class="input input-sm w-full max-w-xs"><i data-lucide="search" class="size-4 opacity-50"></i><input type="search" placeholder="Cari nama atau NIS..." onkeyup="app.filterTable('tbody-students', this.value)"></label>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="table table-zebra">
+                                    <thead><tr><th>NIS/NISN</th><th>Nama Lengkap</th><th>L/P</th><th>Status</th><th>Aksi</th></tr></thead>
+                                    <tbody id="tbody-students"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- MASTER CLASSES -->
+                    <div id="content-classes" class="view-content hidden space-y-4 no-print">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-2xl font-bold">Master Data Kelas</h2>
+                            <button onclick="app.openClassModal()" class="btn btn-primary btn-sm"><i data-lucide="plus" class="size-4"></i> Tambah Kelas</button>
+                        </div>
+                        <div class="card bg-base-100 border border-base-300 overflow-hidden">
+                            <div class="p-4 border-b border-base-300 bg-base-200/60">
+                                <label class="input input-sm w-full max-w-xs"><i data-lucide="search" class="size-4 opacity-50"></i><input type="search" placeholder="Cari kelas..." onkeyup="app.filterTable('tbody-classes', this.value)"></label>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="table table-zebra">
+                                    <thead><tr><th>Nama Kelas</th><th>Tingkat</th><th>Tahun Ajaran</th><th>Wali Kelas</th><th>Status</th></tr></thead>
+                                    <tbody id="tbody-classes"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- MASTER TEACHERS (ADMIN) -->
+                    <div id="content-teachers" class="view-content hidden space-y-4 no-print">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-2xl font-bold">Manajemen Guru</h2>
+                            <button onclick="app.openTeacherModal()" class="btn btn-primary btn-sm"><i data-lucide="plus" class="size-4"></i> Tambah Guru</button>
+                        </div>
+                        <div class="card bg-base-100 border border-base-300 overflow-hidden">
+                            <div class="p-4 border-b border-base-300 bg-base-200/60">
+                                <label class="input input-sm w-full max-w-xs"><i data-lucide="search" class="size-4 opacity-50"></i><input type="search" placeholder="Cari nama atau username..." onkeyup="app.filterTable('tbody-teachers', this.value)"></label>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="table table-zebra">
+                                    <thead><tr><th>Nama Lengkap</th><th>Username</th><th>Kontak</th><th>Kelas Diampu</th><th>Status</th><th>Aksi</th></tr></thead>
+                                    <tbody id="tbody-teachers"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ATTENDANCE -->
+                    <div id="content-attendance" class="view-content hidden space-y-4 no-print">
+                        <h2 class="text-2xl font-bold">Input Absensi</h2>
+                        <div class="card bg-base-100 border border-base-300">
+                            <div class="card-body p-5">
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Tanggal</legend><input type="date" id="att-date" class="input w-full"></fieldset>
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Kelas</legend><select id="att-class" class="select w-full"><option disabled selected value="">-- Pilih Kelas --</option></select></fieldset>
+                                    <button onclick="app.loadAttendanceForm()" class="btn btn-neutral w-full">Tampilkan Daftar Siswa</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="att-entry-container" class="card bg-base-100 border border-base-300 overflow-hidden hidden">
+                            <div class="p-4 border-b border-base-300 flex justify-between items-center bg-base-200/60">
+                                <h3 class="font-semibold">Daftar Siswa</h3>
+                                <button onclick="app.markAllAttendance('Hadir')" class="btn btn-ghost btn-sm text-primary">Tandai Semua Hadir</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="table">
+                                    <thead><tr>
+                                        <th class="w-12">No</th>
+                                        <th>NIS</th>
+                                        <th>Nama Siswa</th>
+                                        <th class="text-center"><button type="button" onclick="app.markAllAttendance('Hadir')" title="Tandai semua Hadir" class="btn btn-ghost btn-xs text-success">Hadir</button></th>
+                                        <th class="text-center"><button type="button" onclick="app.markAllAttendance('Sakit')" title="Tandai semua Sakit" class="btn btn-ghost btn-xs text-warning">Sakit</button></th>
+                                        <th class="text-center"><button type="button" onclick="app.markAllAttendance('Izin')" title="Tandai semua Izin" class="btn btn-ghost btn-xs text-info">Izin</button></th>
+                                        <th class="text-center"><button type="button" onclick="app.markAllAttendance('Alpa')" title="Tandai semua Alpa" class="btn btn-ghost btn-xs text-error">Alpa</button></th>
+                                        <th>Keterangan</th>
+                                    </tr></thead>
+                                    <tbody id="tbody-attendance"></tbody>
+                                </table>
+                            </div>
+                            <div class="p-4 border-t border-base-300 flex justify-end">
+                                <button id="btn-save-att" onclick="app.saveAttendance()" class="btn btn-primary"><i data-lucide="save" class="size-4"></i> Simpan Data Absensi</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- MY ATTENDANCE (siswa) -->
+                    <div id="content-myattendance" class="view-content hidden space-y-4 no-print">
+                        <div>
+                            <h2 class="text-2xl font-bold">Kehadiran Saya</h2>
+                            <p class="text-sm text-base-content/60" id="my-profile"></p>
+                        </div>
+
+                        <div class="card bg-base-100 border border-base-300">
+                            <div class="card-body p-5 flex-row items-center justify-between gap-4">
+                                <div>
+                                    <p class="text-sm text-base-content/60">Status hari ini</p>
+                                    <p class="text-xs text-base-content/60 mt-1" id="my-today-note"></p>
+                                </div>
+                                <span id="my-today"></span>
+                            </div>
+                        </div>
+
+                        <div class="card bg-base-100 border border-base-300">
+                            <div class="card-body p-5">
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Dari Tanggal</legend><input type="date" id="my-start" class="input w-full"></fieldset>
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Sampai Tanggal</legend><input type="date" id="my-end" class="input w-full"></fieldset>
+                                    <button type="button" onclick="app.loadMyAttendance()" class="btn btn-primary w-full">Tampilkan</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="stats stats-vertical sm:stats-horizontal bg-base-100 border border-base-300 w-full">
+                            <div class="stat"><div class="stat-title">Hadir</div><div class="stat-value text-success text-2xl" id="my-hadir">0</div></div>
+                            <div class="stat"><div class="stat-title">Sakit</div><div class="stat-value text-warning text-2xl" id="my-sakit">0</div></div>
+                            <div class="stat"><div class="stat-title">Izin</div><div class="stat-value text-info text-2xl" id="my-izin">0</div></div>
+                            <div class="stat"><div class="stat-title">Alpa</div><div class="stat-value text-error text-2xl" id="my-alpa">0</div></div>
+                            <div class="stat"><div class="stat-title">Kehadiran</div><div class="stat-value text-primary text-2xl" id="my-persen">0%</div></div>
+                        </div>
+
+                        <div class="card bg-base-100 border border-base-300 overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="table table-zebra">
+                                    <thead><tr><th>Tanggal</th><th>Status</th><th>Keterangan</th></tr></thead>
+                                    <tbody id="tbody-my"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- SETTINGS -->
+                    <div id="content-settings" class="view-content hidden space-y-6 no-print">
+                        <h2 class="text-2xl font-bold">Pengaturan</h2>
+
+                        <!-- Data sekolah (admin) -->
+                        <div class="card bg-base-100 border border-base-300 admin-only hidden">
+                            <div class="card-body">
+                                <h3 class="card-title text-base">Data Sekolah</h3>
+                                <p class="text-sm text-base-content/60">Dipakai pada judul aplikasi dan kop laporan cetak.</p>
+                                <form id="form-settings" class="space-y-2 max-w-2xl" onsubmit="return false;">
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Nama Sekolah</legend><input type="text" id="set-school-name" maxlength="100" class="input w-full"></fieldset>
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Alamat Sekolah</legend><input type="text" id="set-school-address" maxlength="200" class="input w-full"></fieldset>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <fieldset class="fieldset"><legend class="fieldset-legend">Nama Kepala Sekolah</legend><input type="text" id="set-principal-name" maxlength="100" class="input w-full"></fieldset>
+                                        <fieldset class="fieldset"><legend class="fieldset-legend">NIP Kepala Sekolah</legend><input type="text" id="set-principal-nip" inputmode="numeric" class="input w-full"></fieldset>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Absensi (admin) -->
+                        <div class="card bg-base-100 border border-base-300 admin-only hidden">
+                            <div class="card-body">
+                                <h3 class="card-title text-base">Absensi</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+                                    <fieldset class="fieldset">
+                                        <legend class="fieldset-legend">Tahun Ajaran Aktif</legend>
+                                        <input type="text" id="set-academic-year" placeholder="2025/2026" class="input w-full">
+                                        <p class="label">Terisi otomatis saat menambah kelas baru.</p>
+                                    </fieldset>
+                                    <fieldset class="fieldset">
+                                        <legend class="fieldset-legend">Batas Edit Absensi Guru (hari)</legend>
+                                        <input type="number" id="set-edit-window" min="0" max="365" inputmode="numeric" class="input w-full">
+                                        <p class="label">0 = tanpa batas. Admin tidak dibatasi.</p>
+                                    </fieldset>
+                                </div>
+                                <div class="card-actions mt-2">
+                                    <button type="button" onclick="app.submitSettings()" class="btn btn-primary">Simpan Pengaturan</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Akun saya (semua pengguna) -->
+                        <div class="card bg-base-100 border border-base-300">
+                            <div class="card-body">
+                                <h3 class="card-title text-base">Akun Saya</h3>
+                                <p class="text-sm text-base-content/60" id="set-account-info"></p>
+                                <form id="form-password" class="space-y-2 max-w-md" onsubmit="return false;" novalidate>
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Password Lama</legend><input type="password" id="pw-old" autocomplete="current-password" class="input w-full"></fieldset>
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Password Baru</legend><input type="password" id="pw-new" autocomplete="new-password" placeholder="Minimal 6 karakter" class="input w-full"></fieldset>
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Ulangi Password Baru</legend><input type="password" id="pw-confirm" autocomplete="new-password" class="input w-full"></fieldset>
+                                </form>
+                                <div class="card-actions mt-2">
+                                    <button type="button" onclick="app.submitPassword()" class="btn btn-primary">Ubah Password</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- REPORTS -->
+                    <div id="content-reports" class="view-content hidden space-y-4">
+                        <div class="flex justify-between items-center no-print">
+                            <h2 class="text-2xl font-bold">Laporan Absensi</h2>
+                            <button onclick="window.print()" class="btn btn-neutral btn-sm"><i data-lucide="printer" class="size-4"></i> Cetak Laporan</button>
+                        </div>
+
+                        <div class="card bg-base-100 border border-base-300 no-print">
+                            <div class="card-body p-5">
+                                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Dari Tanggal</legend><input type="date" id="rep-start" class="input w-full"></fieldset>
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Sampai Tanggal</legend><input type="date" id="rep-end" class="input w-full"></fieldset>
+                                    <fieldset class="fieldset"><legend class="fieldset-legend">Kelas</legend><select id="rep-class" class="select w-full"><option disabled selected value="">Semua Kelas</option></select></fieldset>
+                                    <button onclick="app.generateReport()" class="btn btn-primary w-full">Terapkan Filter</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="hidden print-only mb-6 text-center border-b pb-4">
+                            <h1 class="text-2xl font-bold js-school-name">Laporan Absensi Sekolah</h1>
+                            <p class="text-sm" id="print-address"></p>
+                            <h2 class="text-lg font-semibold mt-2">Laporan Absensi Siswa</h2>
+                            <p class="text-base-content/70" id="print-subtitle">Periode Cetak</p>
+                        </div>
+
+                        <div id="rep-summary" class="hidden">
+                            <div class="stats stats-vertical md:stats-horizontal bg-base-100 border border-base-300 w-full">
+                                <div class="stat"><div class="stat-title">Total Data</div><div class="stat-value text-primary text-2xl" id="sum-total">0</div></div>
+                                <div class="stat"><div class="stat-title">Hadir</div><div class="stat-value text-success text-2xl" id="sum-hadir">0</div></div>
+                                <div class="stat"><div class="stat-title">Sakit</div><div class="stat-value text-warning text-2xl" id="sum-sakit">0</div></div>
+                                <div class="stat"><div class="stat-title">Izin</div><div class="stat-value text-info text-2xl" id="sum-izin">0</div></div>
+                                <div class="stat"><div class="stat-title">Alpa</div><div class="stat-value text-error text-2xl" id="sum-alpa">0</div></div>
+                                <div class="stat"><div class="stat-title">Tingkat Kehadiran</div><div class="stat-value text-primary" id="sum-persentase">0%</div></div>
+                            </div>
+                        </div>
+
+                        <div class="card bg-base-100 border border-base-300 overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="table table-zebra">
+                                    <thead><tr><th>Tanggal</th><th>NIS</th><th>Nama Siswa</th><th>Kelas</th><th>Status</th><th>Keterangan</th></tr></thead>
+                                    <tbody id="tbody-reports"><tr><td colspan="6" class="p-8 text-center text-base-content/60">Gunakan filter untuk menampilkan data laporan.</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <div class="hidden print-only mt-10">
+                            <div class="ml-auto w-64 text-center text-sm">
+                                <p>Mengetahui,<br>Kepala Sekolah</p>
+                                <p class="mt-16 font-semibold underline" id="print-principal">&nbsp;</p>
+                                <p id="print-principal-nip"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="drawer-side z-40 no-print">
+                <label for="app-drawer" aria-label="Tutup menu" class="drawer-overlay"></label>
+                <aside class="bg-base-100 border-r border-base-300 w-64 min-h-full flex flex-col">
+                    <div class="h-16 flex items-center px-6 border-b border-base-300 shrink-0">
+                        <i data-lucide="school" class="size-6 text-primary mr-3"></i><span class="text-lg font-bold truncate js-school-name">EduAbsen</span>
+                    </div>
+                    <ul class="menu w-full flex-1 p-3 gap-1">
+                        <li class="staff-only"><button type="button" onclick="app.navigate('dashboard')" class="nav-item" data-view="dashboard"><i data-lucide="layout-dashboard" class="size-5"></i> Dashboard</button></li>
+
+                        <li class="menu-title mt-3 staff-only">Operasional</li>
+                        <li class="staff-only"><button type="button" onclick="app.navigate('attendance')" class="nav-item" data-view="attendance"><i data-lucide="clipboard-check" class="size-5"></i> Input Absensi</button></li>
+                        <li class="staff-only"><button type="button" onclick="app.navigate('reports')" class="nav-item" data-view="reports"><i data-lucide="bar-chart-3" class="size-5"></i> Laporan</button></li>
+
+                        <li class="menu-title mt-3 admin-only hidden">Master Data</li>
+                        <li class="admin-only hidden"><button type="button" onclick="app.navigate('students')" class="nav-item" data-view="students"><i data-lucide="users" class="size-5"></i> Data Siswa</button></li>
+                        <li class="admin-only hidden"><button type="button" onclick="app.navigate('classes')" class="nav-item" data-view="classes"><i data-lucide="door-open" class="size-5"></i> Data Kelas</button></li>
+                        <li class="admin-only hidden"><button type="button" onclick="app.navigate('teachers')" class="nav-item" data-view="teachers"><i data-lucide="user-cog" class="size-5"></i> Data Guru</button></li>
+                        <li class="student-only hidden"><button type="button" onclick="app.navigate('myattendance')" class="nav-item" data-view="myattendance"><i data-lucide="calendar-check" class="size-5"></i> Kehadiran Saya</button></li>
+                        <li class="menu-title mt-3">Sistem</li>
+                        <li><button type="button" onclick="app.navigate('settings')" class="nav-item" data-view="settings"><i data-lucide="settings" class="size-5"></i> Pengaturan</button></li>
+                    </ul>
+                    <div class="p-4 border-t border-base-300 shrink-0">
+                        <button onclick="app.logout()" class="btn btn-outline w-full"><i data-lucide="log-out" class="size-4"></i> Logout</button>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+    <dialog id="modal-student" class="modal modal-bottom sm:modal-middle no-print">
+        <div class="modal-box w-full max-w-lg">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-lg">Tambah Siswa</h3>
+                <button type="button" onclick="app.ui.closeModal('modal-student')" class="btn btn-sm btn-circle btn-ghost" aria-label="Tutup"><i data-lucide="x" class="size-4"></i></button>
+            </div>
+            <form id="form-student" class="space-y-2" onsubmit="return false;">
+                <input type="hidden" id="fs-id">
+                <div class="grid grid-cols-2 gap-4">
+                    <fieldset class="fieldset"><legend class="fieldset-legend">NIS</legend><input type="text" id="fs-nis" required class="input w-full"></fieldset>
+                    <fieldset class="fieldset"><legend class="fieldset-legend">NISN</legend><input type="text" id="fs-nisn" required class="input w-full"></fieldset>
+                </div>
+                <fieldset class="fieldset"><legend class="fieldset-legend">Nama Lengkap</legend><input type="text" id="fs-name" required class="input w-full"></fieldset>
+                <div class="grid grid-cols-2 gap-4">
+                    <fieldset class="fieldset"><legend class="fieldset-legend">Jenis Kelamin</legend><select id="fs-gender" class="select w-full"><option value="L">Laki-laki</option><option value="P">Perempuan</option></select></fieldset>
+                    <fieldset class="fieldset"><legend class="fieldset-legend">Kelas</legend><select id="fs-class" required class="select w-full"><option disabled selected value="">-- Pilih Kelas --</option></select></fieldset>
+                </div>
+            </form>
+            <div class="modal-action">
+                <button type="button" onclick="app.ui.closeModal('modal-student')" class="btn">Batal</button>
+                <button type="button" onclick="app.submitStudent()" class="btn btn-primary">Simpan</button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>Tutup</button></form>
+    </dialog>
+
+    <dialog id="modal-class" class="modal modal-bottom sm:modal-middle no-print">
+        <div class="modal-box w-full max-w-lg">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-lg">Tambah Kelas</h3>
+                <button type="button" onclick="app.ui.closeModal('modal-class')" class="btn btn-sm btn-circle btn-ghost" aria-label="Tutup"><i data-lucide="x" class="size-4"></i></button>
+            </div>
+            <form id="form-class" class="space-y-2" onsubmit="return false;">
+                <input type="hidden" id="fc-id">
+                <fieldset class="fieldset"><legend class="fieldset-legend">Nama Kelas</legend><input type="text" id="fc-name" placeholder="Misal: X MIPA 1" required class="input w-full"></fieldset>
+                <fieldset class="fieldset"><legend class="fieldset-legend">Wali Kelas</legend><select id="fc-homeroom" class="select w-full"><option disabled selected value="">-- Tanpa Wali Kelas --</option></select></fieldset>
+                <div class="grid grid-cols-2 gap-4">
+                    <fieldset class="fieldset"><legend class="fieldset-legend">Tingkat</legend><input type="text" id="fc-level" required class="input w-full"></fieldset>
+                    <fieldset class="fieldset"><legend class="fieldset-legend">Tahun Ajaran</legend><input type="text" id="fc-year" placeholder="2023/2024" required class="input w-full"></fieldset>
+                </div>
+            </form>
+            <div class="modal-action">
+                <button type="button" onclick="app.ui.closeModal('modal-class')" class="btn">Batal</button>
+                <button type="button" onclick="app.submitClass()" class="btn btn-primary">Simpan</button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>Tutup</button></form>
+    </dialog>
+
+    <dialog id="modal-teacher" class="modal modal-bottom sm:modal-middle no-print">
+        <div class="modal-box w-full max-w-lg">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-lg" id="ft-title">Tambah Guru</h3>
+                <button type="button" onclick="app.ui.closeModal('modal-teacher')" class="btn btn-sm btn-circle btn-ghost" aria-label="Tutup"><i data-lucide="x" class="size-4"></i></button>
+            </div>
+            <form id="form-teacher" class="space-y-2" onsubmit="return false;">
+                <input type="hidden" id="ft-id">
+                <fieldset class="fieldset"><legend class="fieldset-legend">Nama Lengkap</legend><input type="text" id="ft-name" class="input w-full"></fieldset>
+                <div class="grid grid-cols-2 gap-4">
+                    <fieldset class="fieldset"><legend class="fieldset-legend">NIP</legend><input type="text" id="ft-nip" inputmode="numeric" class="input w-full"></fieldset>
+                    <fieldset class="fieldset"><legend class="fieldset-legend">No. HP</legend><input type="text" id="ft-phone" inputmode="tel" class="input w-full"></fieldset>
+                </div>
+                <fieldset class="fieldset"><legend class="fieldset-legend">Email</legend><input type="email" id="ft-email" class="input w-full"></fieldset>
+                <div class="grid grid-cols-2 gap-4">
+                    <fieldset class="fieldset"><legend class="fieldset-legend">Username</legend><input type="text" id="ft-username" autocomplete="off" class="input w-full"></fieldset>
+                    <fieldset class="fieldset"><legend class="fieldset-legend">Password</legend><input type="password" id="ft-password" autocomplete="new-password" class="input w-full"></fieldset>
+                </div>
+                <fieldset class="fieldset">
+                    <legend class="fieldset-legend">Kelas yang Diampu</legend>
+                    <div id="ft-classes" class="space-y-2 max-h-40 overflow-y-auto border border-base-300 rounded-box p-3"></div>
+                </fieldset>
+                <label class="flex items-center gap-2 text-sm cursor-pointer pt-2"><input type="checkbox" id="ft-active" class="checkbox checkbox-sm checkbox-primary" checked><span>Akun aktif (dapat login)</span></label>
+            </form>
+            <div class="modal-action">
+                <button type="button" onclick="app.ui.closeModal('modal-teacher')" class="btn">Batal</button>
+                <button type="button" onclick="app.submitTeacher()" class="btn btn-primary">Simpan</button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>Tutup</button></form>
+    </dialog>
+    
+    <dialog id="modal-confirm" class="modal modal-bottom sm:modal-middle no-print">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg">Konfirmasi</h3>
+            <p class="py-4 whitespace-pre-line" id="confirm-msg"></p>
+            <div class="modal-action">
+                <button type="button" onclick="app.ui.closeModal('modal-confirm')" class="btn">Batal</button>
+                <button type="button" id="confirm-ok" class="btn btn-primary">Lanjutkan</button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>Tutup</button></form>
+    </dialog>
+
+    <script>
+        lucide.createIcons();
+
+        const isActiveVal = (v) => v === true || v === 'TRUE' || v === 'true';
+
+        const app = {
+            state: { token: localStorage.getItem('eduabsen_token'), user: JSON.parse(localStorage.getItem('eduabsen_user')), data: { classes: [] }, currentAttendanceForm: [] },
+            charts: {},
+
+            api: function(funcName, ...args) {
+                return new Promise((resolve, reject) => {
+                    app.ui.showLoader();
+                    const handleError = (err) => {
+                        const msg = (err && err.message) ? err.message : String(err || '');
+                        // Sesi habis / token tidak valid -> kembali ke halaman login
+                        if (msg.indexOf('AUTH_FAILED') !== -1 && funcName !== 'login' && funcName !== 'logout') {
+                            localStorage.clear();
+                            app.ui.toast("Sesi berakhir, silakan login kembali", "error");
+                            setTimeout(() => window.location.reload(), 1200);
+                        }
+                        reject(new Error(msg || "Gagal terhubung ke server"));
+                    };
+                    google.script.run
+                        .withSuccessHandler(res => {
+                            app.ui.hideLoader();
+                            if (!res || res.success === false) handleError(new Error(res ? res.message : "Gagal terhubung ke server"));
+                            else resolve(res);
+                        })
+                        .withFailureHandler(err => { app.ui.hideLoader(); handleError(err); })[funcName](...args);
+                });
+            },
+
+            navigate: function(viewId) {
+                const adminViews = ['students', 'classes', 'teachers'];
+                if (adminViews.includes(viewId) && !(this.state.user && this.state.user.role === 'admin')) return;
+                const role = this.state.user && this.state.user.role;
+                if (role === 'siswa' && !['myattendance', 'settings'].includes(viewId)) return;
+                if (role !== 'siswa' && viewId === 'myattendance') return;
+
+                document.querySelectorAll('.view-content').forEach(el => el.classList.add('hidden'));
+                const targetView = document.getElementById(`content-${viewId}`);
+                if (targetView) targetView.classList.remove('hidden');
+                this.ui.closeSidebar();
+
+                document.querySelectorAll('.nav-item').forEach(el => {
+                    el.classList.toggle('menu-active', el.dataset.view === viewId);
+                });
+
+                if (viewId === 'dashboard') this.loadDashboard();
+                if (viewId === 'students') this.loadStudents();
+                if (viewId === 'classes') this.loadClassesMaster();
+                if (viewId === 'teachers') this.loadTeachers();
+                if (viewId === 'attendance' || viewId === 'reports') this.loadClassesForSelect();
+                if (viewId === 'myattendance') this.loadMyAttendance();
+            },
+
+            initAuth: function() {
+                if (this.state.token && this.state.user) this.setupUserEnv();
+                else { document.getElementById('view-login').classList.remove('hidden'); document.getElementById('view-app').classList.add('hidden'); }
+
+                document.getElementById('login-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const username = document.getElementById('login-username').value.trim();
+                    const password = document.getElementById('login-password').value;
+                    if (!this.validateLogin(username, password)) return;
+
+                    const btn = document.getElementById('btn-login');
+                    btn.disabled = true;
+                    try {
+                        const res = await this.api('login', username, password);
+                        this.state.token = res.token; this.state.user = res.user;
+                        localStorage.setItem('eduabsen_token', res.token); localStorage.setItem('eduabsen_user', JSON.stringify(res.user));
+                        app.ui.toast("Login Berhasil", "success");
+                        this.setupUserEnv();
+                    } catch(err) {
+                        // Kredensial salah -> indikator error pada field password; error lain -> toast
+                        if (/salah/i.test(err.message)) this.setFieldError('password', err.message);
+                        else app.ui.toast(err.message, "error");
+                    } finally { btn.disabled = false; }
+                });
+
+                ['username', 'password'].forEach(f => {
+                    document.getElementById(`login-${f}`).addEventListener('input', () => this.setFieldError(f, ''));
+                });
+            },
+
+            setFieldError: function(field, msg) {
+                const input = document.getElementById(`login-${field}`);
+                const wrap = document.getElementById(`wrap-${field}`);
+                const box = document.getElementById(`err-${field}`);
+                const hasErr = !!msg;
+                wrap.classList.toggle('input-error', hasErr);
+                input.setAttribute('aria-invalid', hasErr ? 'true' : 'false');
+                box.classList.toggle('hidden', !hasErr);
+                box.querySelector('span').textContent = msg || '';
+            },
+
+            validateLogin: function(username, password) {
+                let firstInvalid = null;
+
+                let uErr = '';
+                if (!username) uErr = 'Username wajib diisi';
+                else if (username.length < 3) uErr = 'Username minimal 3 karakter';
+                this.setFieldError('username', uErr);
+                if (uErr) firstInvalid = firstInvalid || 'login-username';
+
+                let pErr = '';
+                if (!password) pErr = 'Password wajib diisi';
+                else if (password.length < 6) pErr = 'Password minimal 6 karakter';
+                this.setFieldError('password', pErr);
+                if (pErr) firstInvalid = firstInvalid || 'login-password';
+
+                if (firstInvalid) document.getElementById(firstInvalid).focus();
+                return !firstInvalid;
+            },
+
+            togglePassword: function() {
+                const input = document.getElementById('login-password');
+                const show = input.type === 'password';
+                input.type = show ? 'text' : 'password';
+                document.getElementById('pw-icon-show').classList.toggle('hidden', show);
+                document.getElementById('pw-icon-hide').classList.toggle('hidden', !show);
+                document.getElementById('btn-toggle-password').setAttribute('aria-label', show ? 'Sembunyikan password' : 'Tampilkan password');
+            },
+            
+            setupUserEnv: function() {
+                document.getElementById('view-login').classList.add('hidden'); document.getElementById('view-app').classList.remove('hidden');
+                const u = this.state.user || {};
+                const isStudent = u.role === 'siswa';
+
+                if (u.role === 'admin') document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+                document.querySelectorAll('.staff-only').forEach(el => el.classList.toggle('hidden', isStudent));
+                document.querySelectorAll('.student-only').forEach(el => el.classList.toggle('hidden', !isStudent));
+
+                document.getElementById('att-date').value = new Date().toISOString().split('T')[0];
+                this.refreshSettings();
+                this.navigate(u.must_change_password ? 'settings' : (isStudent ? 'myattendance' : 'dashboard'));
+                if (u.must_change_password) app.ui.toast("Demi keamanan, ganti password bawaan Anda sekarang.", "info");
+            },
+
+            logout: function() {
+                this.api('logout', this.state.token).finally(() => { localStorage.clear(); window.location.reload(); });
+            },
+
+            badge: function(active) {
+                return `<span class="badge badge-soft badge-sm ${active ? 'badge-success' : 'badge-error'}">${active ? 'Aktif' : 'Nonaktif'}</span>`;
+            },
+
+            loadDashboard: async function() {
+                try {
+                    const res = await this.api('getDashboardStats', this.state.token);
+                    const stats = res.stats || { totalStudents: 0, hadir: 0, sakit: 0, izin: 0, alpa: 0, persentase: 0 };
+                    document.getElementById('dash-total-siswa').innerText = stats.totalStudents;
+                    document.getElementById('dash-hadir').innerText = stats.hadir;
+                    document.getElementById('dash-sakit-izin').innerText = stats.sakit + stats.izin;
+                    document.getElementById('dash-persentase').innerText = stats.persentase + '%';
+
+                    const chartData = res.chartData || { labels: [], hadir: [], tidakHadir: [] };
+                    if (this.charts.trend) this.charts.trend.destroy();
+                    this.charts.trend = new Chart(document.getElementById('trendChart').getContext('2d'), {
+                        type: 'bar', data: { labels: chartData.labels, datasets: [{ label: 'Hadir', data: chartData.hadir, backgroundColor: '#3b82f6' }, { label: 'Tidak Hadir', data: chartData.tidakHadir, backgroundColor: '#f87171' }] }
+                    });
+                    if (this.charts.pie) this.charts.pie.destroy();
+                    this.charts.pie = new Chart(document.getElementById('pieChart').getContext('2d'), {
+                        type: 'doughnut', data: { labels: ['Hadir', 'Sakit', 'Izin', 'Alpa'], datasets: [{ data: [stats.hadir, stats.sakit, stats.izin, stats.alpa], backgroundColor: ['#10b981', '#f59e0b', '#3b82f6', '#ef4444'] }] }
+                    });
+                } catch(err) { app.ui.toast("Gagal muat dashboard: " + err.message, "error"); }
+            },
+
+            loadStudents: async function() {
+                try {
+                    const res = await this.api('fetchMasterData', this.state.token, 'students');
+                    const tbody = document.getElementById('tbody-students');
+                    if (!tbody) return;
+
+                    const list = (res && Array.isArray(res.data)) ? res.data : [];
+                    if (list.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-base-content/60 p-4">Tidak ada data siswa.</td></tr>';
+                        return;
+                    }
+
+                    tbody.innerHTML = list.map(s => {
+                        if (!s) return '';
+                        const nis = this.esc(s.nis || '-');
+                        const nisn = this.esc(s.nisn || '-');
+                        const name = this.esc(s.full_name || 'Tanpa Nama');
+                        const gender = this.esc(s.gender || '-');
+                        return `<tr><td>${nis} / ${nisn}</td><td class="font-medium">${name}</td><td>${gender}</td><td>${this.badge(isActiveVal(s.is_active))}</td><td><button type="button" onclick="app.resetStudentAccount('${this.esc(s.student_id)}')" class="btn btn-ghost btn-xs text-primary">Reset Akun</button></td></tr>`;
+                    }).join('');
+                } catch(err) { app.ui.toast(err.message, "error"); }
+            },
+
+            // Ambil data kelas terbaru dari server lalu isi dropdown kelas di form siswa
+            openStudentModal: async function() {
+                try {
+                    const res = await this.api('fetchMasterData', this.state.token, 'classes');
+                    const list = (res && Array.isArray(res.data)) ? res.data : [];
+                    this.state.data.classes = list;
+
+                    const activeClasses = list.filter(c => c && isActiveVal(c.is_active));
+                    if (activeClasses.length === 0) {
+                        return app.ui.toast("Belum ada data kelas aktif. Tambahkan kelas terlebih dahulu.", "error");
+                    }
+
+                    const options = activeClasses
+                        .map(c => `<option value="${this.esc(c.class_id)}">${this.esc(c.class_name)} (${this.esc(c.academic_year || '-')})</option>`)
+                        .join('');
+                    document.getElementById('fs-class').innerHTML = '<option disabled selected value="">-- Pilih Kelas --</option>' + options;
+                    document.getElementById('form-student').reset();
+                    app.ui.openModal('modal-student');
+                } catch(err) { app.ui.toast(err.message, "error"); }
+            },
+
+            submitStudent: async function() {
+                const ok = this.validate([
+                    { id: 'fs-nis', check: v => !v ? 'NIS wajib diisi' : (v.length > 20 ? 'NIS maksimal 20 karakter' : '') },
+                    { id: 'fs-nisn', check: v => !v ? 'NISN wajib diisi' : (!/^\d{10}$/.test(v) ? 'NISN harus 10 digit angka' : '') },
+                    { id: 'fs-name', check: v => !v ? 'Nama lengkap wajib diisi' : (v.length < 3 ? 'Nama minimal 3 karakter' : '') },
+                    { id: 'fs-class', check: v => !v ? 'Pilih kelas terlebih dahulu' : '' }
+                ]);
+                if (!ok) return;
+
+                try {
+                    await this.api('saveStudent', this.state.token, {
+                        student_id: document.getElementById('fs-id').value,
+                        nis: document.getElementById('fs-nis').value.trim(),
+                        nisn: document.getElementById('fs-nisn').value.trim(),
+                        full_name: document.getElementById('fs-name').value.trim(),
+                        gender: document.getElementById('fs-gender').value,
+                        class_id: classId
+                    });
+                    app.ui.toast("Tersimpan", "success"); app.ui.closeModal('modal-student'); document.getElementById('form-student').reset(); this.loadStudents();
+                } catch(err) { this.handleServerError(err, [[/NIS atau NISN/i, 'fs-nis']]); }
+            },
+
+            loadClassesMaster: async function() {
+                try {
+                    const res = await this.api('fetchMasterData', this.state.token, 'classes');
+                    const list = (res && Array.isArray(res.data)) ? res.data : [];
+                    this.state.data.classes = list;
+                    const teacherMap = {};
+                    try {
+                        const tRes = await this.api('fetchMasterData', this.state.token, 'teachers');
+                        ((tRes && Array.isArray(tRes.data)) ? tRes.data : []).forEach(t => { if (t) teacherMap[t.user_id] = t.full_name; });
+                    } catch (e) { /* wali kelas ditampilkan '-' jika gagal dimuat */ }
+                    const tbody = document.getElementById('tbody-classes');
+                    if (!tbody) return;
+
+                    if (list.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-base-content/60 p-4">Tidak ada data kelas.</td></tr>';
+                        return;
+                    }
+
+                    tbody.innerHTML = list.map(c => {
+                        if (!c) return '';
+                        return `<tr><td class="font-medium">${this.esc(c.class_name || '-')}</td><td>${this.esc(c.grade_level || '-')}</td><td>${this.esc(c.academic_year || '-')}</td><td>${this.esc(teacherMap[c.homeroom_teacher] || '-')}</td><td>${this.badge(isActiveVal(c.is_active))}</td></tr>`;
+                    }).join('');
+                } catch(err) { app.ui.toast(err.message, "error"); }
+            },
+
+            openClassModal: async function() {
+                try {
+                    const res = await this.api('fetchMasterData', this.state.token, 'teachers');
+                    const teachers = ((res && Array.isArray(res.data)) ? res.data : []).filter(t => t && isActiveVal(t.is_active));
+                    document.getElementById('form-class').reset();
+                    document.getElementById('fc-year').value = (this.state.settings && this.state.settings.active_academic_year) || '';
+                    document.getElementById('fc-homeroom').innerHTML = '<option value="">-- Tanpa Wali Kelas --</option>' +
+                        teachers.map(t => `<option value="${this.esc(t.user_id)}">${this.esc(t.full_name)}</option>`).join('');
+                    app.ui.openModal('modal-class');
+                } catch (err) { app.ui.toast(err.message, "error"); }
+            },
+
+            submitClass: async function() {
+                const ok = this.validate([
+                    { id: 'fc-name', check: v => !v ? 'Nama kelas wajib diisi' : (v.length > 50 ? 'Maksimal 50 karakter' : '') },
+                    { id: 'fc-level', check: v => !v ? 'Tingkat wajib diisi' : '' },
+                    { id: 'fc-year', check: v => {
+                        if (!v) return 'Tahun ajaran wajib diisi';
+                        const m = /^(\d{4})\/(\d{4})$/.exec(v);
+                        return (!m || Number(m[2]) !== Number(m[1]) + 1) ? 'Format harus 2025/2026' : '';
+                    } }
+                ]);
+                if (!ok) return;
+                
+                try {
+                    await this.api('saveClass', this.state.token, { 
+                        class_id: document.getElementById('fc-id').value, 
+                        class_name: document.getElementById('fc-name').value.trim(), 
+                        grade_level: document.getElementById('fc-level').value.trim(), 
+                        academic_year: document.getElementById('fc-year').value.trim(), 
+                        homeroom_teacher: document.getElementById('fc-homeroom').value
+                    });
+                    app.ui.toast("Kelas Tersimpan", "success"); app.ui.closeModal('modal-class'); document.getElementById('form-class').reset(); this.loadClassesMaster();
+                } catch(err) { this.handleServerError(err, [[/Nama kelas/i, 'fc-name'], [/Wali kelas/i, 'fc-homeroom']]); }
+            },
+
+            esc: function(v) {
+                return String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+            },
+
+            parseClassIds: function(v) {
+                try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+            },
+
+            loadTeachers: async function() {
+                try {
+                    const tRes = await this.api('fetchMasterData', this.state.token, 'teachers');
+                    const cRes = await this.api('fetchMasterData', this.state.token, 'classes');
+                    const teachers = (tRes && Array.isArray(tRes.data)) ? tRes.data : [];
+                    this.state.data.teachers = teachers;
+                    this.state.data.classes = (cRes && Array.isArray(cRes.data)) ? cRes.data : [];
+
+                    const classMap = {};
+                    this.state.data.classes.forEach(c => { if (c) classMap[c.class_id] = c.class_name; });
+
+                    const tbody = document.getElementById('tbody-teachers');
+                    if (!tbody) return;
+                    if (teachers.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-base-content/60 p-4">Belum ada data guru.</td></tr>';
+                        return;
+                    }
+
+                    tbody.innerHTML = teachers.map(t => {
+                        if (!t) return '';
+                        const active = isActiveVal(t.is_active);
+                        const names = this.parseClassIds(t.assigned_classes).map(id => classMap[id]).filter(Boolean);
+                        const badges = names.length
+                            ? names.map(n => `<span class="badge badge-ghost badge-sm mr-1 mb-1">${this.esc(n)}</span>`).join('')
+                            : '<span class="text-base-content/40">-</span>';
+                        const contact = (t.phone || t.email)
+                            ? `${t.phone ? `<div>${this.esc(t.phone)}</div>` : ''}${t.email ? `<div class="text-xs text-base-content/60">${this.esc(t.email)}</div>` : ''}`
+                            : '<span class="text-base-content/40">-</span>';
+                        const uid = this.esc(t.user_id);
+                        return `<tr><td><div class="font-medium">${this.esc(t.full_name)}</div>${t.nip ? `<div class="text-xs text-base-content/60">NIP ${this.esc(t.nip)}</div>` : ''}</td><td>${this.esc(t.username)}</td><td>${contact}</td><td>${badges}</td><td>${this.badge(active)}</td><td class="whitespace-nowrap"><button type="button" onclick="app.openTeacherModal('${uid}')" class="btn btn-ghost btn-xs text-primary">Edit</button><button type="button" onclick="app.toggleTeacher('${uid}')" class="btn btn-ghost btn-xs ${active ? 'text-error' : 'text-success'}">${active ? 'Nonaktifkan' : 'Aktifkan'}</button></td></tr>`;
+                    }).join('');
+                } catch (err) { app.ui.toast(err.message, "error"); }
+            },
+
+            openTeacherModal: async function(userId) {
+                try {
+                    const cRes = await this.api('fetchMasterData', this.state.token, 'classes');
+                    const allClasses = (cRes && Array.isArray(cRes.data)) ? cRes.data : [];
+                    this.state.data.classes = allClasses;
+
+                    const t = userId ? (this.state.data.teachers || []).find(x => x && x.user_id === userId) : null;
+                    const assigned = t ? this.parseClassIds(t.assigned_classes) : [];
+
+                    document.getElementById('form-teacher').reset();
+                    document.getElementById('ft-id').value = t ? t.user_id : '';
+                    document.getElementById('ft-title').innerText = t ? 'Edit Guru' : 'Tambah Guru';
+                    document.getElementById('ft-name').value = t ? (t.full_name || '') : '';
+                    document.getElementById('ft-username').value = t ? (t.username || '') : '';
+                    document.getElementById('ft-nip').value = t ? (t.nip || '') : '';
+                    document.getElementById('ft-phone').value = t ? (t.phone || '') : '';
+                    document.getElementById('ft-email').value = t ? (t.email || '') : '';
+                    const pw = document.getElementById('ft-password');
+                    pw.value = '';
+                    pw.placeholder = t ? 'Kosongkan jika tidak diubah' : 'Minimal 6 karakter';
+                    document.getElementById('ft-active').checked = t ? isActiveVal(t.is_active) : true;
+
+                    const visible = allClasses.filter(c => c && (isActiveVal(c.is_active) || assigned.includes(c.class_id)));
+                    document.getElementById('ft-classes').innerHTML = visible.length
+                        ? visible.map(c => `<label class="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" name="ft-class" value="${this.esc(c.class_id)}" class="checkbox checkbox-sm checkbox-primary" ${assigned.includes(c.class_id) ? 'checked' : ''}><span>${this.esc(c.class_name)} <span class="text-base-content/40">(${this.esc(c.academic_year || '-')})</span></span></label>`).join('')
+                        : '<p class="text-sm text-base-content/60">Belum ada kelas aktif.</p>';
+
+                    app.ui.openModal('modal-teacher');
+                } catch (err) { app.ui.toast(err.message, "error"); }
+            },
+
+            submitTeacher: async function() {
+                const id = document.getElementById('ft-id').value;
+                const isNew = !id;
+
+                const ok = this.validate([
+                    { id: 'ft-name', check: v => !v ? 'Nama lengkap wajib diisi' : '' },
+                    { id: 'ft-username', check: v => !v ? 'Username wajib diisi' : (!/^[A-Za-z0-9._-]{3,30}$/.test(v) ? '3-30 karakter: huruf, angka, titik, garis bawah, atau strip' : '') },
+                    { id: 'ft-password', raw: true, check: v => (isNew && !v) ? 'Password wajib diisi untuk guru baru' : (v && v.length < 6 ? 'Password minimal 6 karakter' : '') },
+                    { id: 'ft-nip', check: v => (v && !/^[0-9]{5,30}$/.test(v)) ? 'NIP hanya angka (5-30 digit)' : '' },
+                    { id: 'ft-phone', check: v => (v && !/^[0-9+][0-9\s-]{5,19}$/.test(v)) ? 'Nomor HP tidak valid' : '' },
+                    { id: 'ft-email', check: v => (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) ? 'Format email tidak valid' : '' }
+                ]);
+                if (!ok) return;
+
+                const password = document.getElementById('ft-password').value;
+                const payload = {
+                    user_id: id,
+                    full_name: document.getElementById('ft-name').value.trim(),
+                    nip: document.getElementById('ft-nip').value.trim(),
+                    phone: document.getElementById('ft-phone').value.trim(),
+                    email: document.getElementById('ft-email').value.trim(),
+                    username: document.getElementById('ft-username').value.trim(),
+                    assigned_classes: Array.from(document.querySelectorAll('input[name="ft-class"]:checked')).map(el => el.value),
+                    is_active: document.getElementById('ft-active').checked
+                };
+                if (password) payload.password = password;
+
+                try {
+                    const res = await this.api('saveTeacher', this.state.token, payload);
+                    app.ui.toast(res.message || "Data guru tersimpan", "success");
+                    app.ui.closeModal('modal-teacher');
+                    this.loadTeachers();
+                } catch (err) {
+                    this.handleServerError(err, [
+                        [/Username/i, 'ft-username'], [/NIP/i, 'ft-nip'], [/HP/i, 'ft-phone'],
+                        [/email/i, 'ft-email'], [/Password/i, 'ft-password'], [/Nama lengkap/i, 'ft-name']
+                    ]);
+                }
+            },
+
+            toggleTeacher: async function(userId) {
+                const t = (this.state.data.teachers || []).find(x => x && x.user_id === userId);
+                if (!t) return;
+                const makeActive = !isActiveVal(t.is_active);
+                try {
+                    await this.api('saveTeacher', this.state.token, { user_id: userId, is_active: makeActive });
+                    app.ui.toast(makeActive ? "Akun guru diaktifkan" : "Akun guru dinonaktifkan", "success");
+                    this.loadTeachers();
+                } catch (err) { app.ui.toast(err.message, "error"); }
+            },
+            
+            loadPublicSettings: function() {
+                google.script.run
+                    .withSuccessHandler(r => { if (r && r.success) this.applySettings(r.settings); })
+                    .getPublicSettings();
+            },
+
+            refreshSettings: function() {
+                google.script.run
+                    .withSuccessHandler(r => { if (r && r.success) this.applySettings(r.settings); })
+                    .getSettings(this.state.token);
+            },
+
+            applySettings: function(s) {
+                this.state.settings = Object.assign({}, this.state.settings, s || {});
+                const cur = this.state.settings;
+                const name = cur.school_name || 'EduAbsen';
+
+                document.querySelectorAll('.js-school-name').forEach(el => { el.textContent = name; });
+                document.title = 'Absensi ' + name;
+
+                const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+                setText('print-address', cur.school_address || '');
+                setText('print-principal', cur.principal_name || '\u00A0');
+                setText('print-principal-nip', cur.principal_nip ? 'NIP. ' + cur.principal_nip : '');
+            },
+
+            loadSettings: async function() {
+                this.clearErrors('content-settings');
+                const u = this.state.user || {};
+                document.getElementById('set-account-info').textContent =
+                    `${u.full_name || u.username} (${u.username}) - ${({ admin: 'Administrator', guru: 'Guru', siswa: 'Siswa' })[u.role] || u.role}
+                document.getElementById('form-password').reset();
+
+                try {
+                    const res = await this.api('getSettings', this.state.token);
+                    this.applySettings(res.settings);
+                    if (u.role !== 'admin') return;
+
+                    const s = res.settings;
+                    document.getElementById('set-school-name').value = s.school_name || '';
+                    document.getElementById('set-school-address').value = s.school_address || '';
+                    document.getElementById('set-principal-name').value = s.principal_name || '';
+                    document.getElementById('set-principal-nip').value = s.principal_nip || '';
+                    document.getElementById('set-academic-year').value = s.active_academic_year || '';
+                    document.getElementById('set-edit-window').value = s.edit_window_days || '0';
+                } catch (err) { app.ui.toast(err.message, "error"); }
+            },
+
+            submitSettings: async function() {
+                const ok = this.validate([
+                    { id: 'set-school-name', check: v => !v ? 'Nama sekolah wajib diisi' : (v.length > 100 ? 'Maksimal 100 karakter' : '') },
+                    { id: 'set-school-address', check: v => v.length > 200 ? 'Maksimal 200 karakter' : '' },
+                    { id: 'set-principal-name', check: v => v.length > 100 ? 'Maksimal 100 karakter' : '' },
+                    { id: 'set-principal-nip', check: v => (v && !/^[0-9]{5,30}$/.test(v)) ? 'NIP hanya angka (5-30 digit)' : '' },
+                    { id: 'set-academic-year', check: v => {
+                        if (!v) return '';
+                        const m = /^(\d{4})\/(\d{4})$/.exec(v);
+                        return (!m || Number(m[2]) !== Number(m[1]) + 1) ? 'Format harus 2025/2026' : '';
+                    } },
+                    { id: 'set-edit-window', check: v => (v && (!/^\d{1,3}$/.test(v) || Number(v) > 365)) ? 'Isi angka 0 sampai 365' : '' }
+                ]);
+                if (!ok) return;
+    
+                const payload = {
+                    school_name: document.getElementById('set-school-name').value.trim(),
+                    school_address: document.getElementById('set-school-address').value.trim(),
+                    principal_name: document.getElementById('set-principal-name').value.trim(),
+                    principal_nip: document.getElementById('set-principal-nip').value.trim(),
+                    active_academic_year: document.getElementById('set-academic-year').value.trim(),
+                    edit_window_days: document.getElementById('set-edit-window').value.trim() || '0'
+                };
+
+                try {
+                    const res = await this.api('saveSettings', this.state.token, payload);
+                    this.applySettings(res.settings);
+                    app.ui.toast(res.message || "Pengaturan tersimpan", "success");
+                } catch (err) { 
+                    this.handleServerError(err, [
+                        [/Nama sekolah/i, 'set-school-name'], [/Alamat/i, 'set-school-address'],
+                        [/kepala sekolah/i, 'set-principal-name'], [/NIP/i, 'set-principal-nip'],
+                        [/Tahun ajaran/i, 'set-academic-year'], [/edit absensi/i, 'set-edit-window']
+                    ]); 
+                }
+            },
+
+            submitPassword: async function() {
+                const oldPw = document.getElementById('pw-old').value;
+                const newPw = document.getElementById('pw-new').value;
+
+                const ok = this.validate([
+                    { id: 'pw-old', raw: true, check: v => !v ? 'Password lama wajib diisi' : '' },
+                    { id: 'pw-new', raw: true, check: v => !v ? 'Password baru wajib diisi' : (v.length < 6 ? 'Minimal 6 karakter' : (v === oldVal() ? 'Harus berbeda dari password lama' : '')) },
+                    { id: 'pw-confirm', raw: true, check: v => v !== newVal() ? 'Konfirmasi tidak sama dengan password baru' : '' }
+                ]);
+                if (!ok) return;
+                
+                try {
+                    await this.api('changePassword', this.state.token, oldPw, newPw);
+                    app.ui.toast("Password diubah. Silakan login kembali.", "success");
+                    setTimeout(() => { localStorage.clear(); window.location.reload(); }, 1500);
+                } catch (err) { 
+                    this.handleServerError(err, [[/Password lama/i, 'pw-old'], [/Password baru/i, 'pw-new']]);
+                }
+            },
+            
+            // Tampilkan / hapus pesan error di bawah sebuah field
+            fieldError: function(id, msg) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const isSelect = el.tagName === 'SELECT';
+                let box = el.parentElement.querySelector(`[data-err-for="${id}"]`);
+
+                el.classList.toggle(isSelect ? 'select-error' : 'input-error', !!msg);
+                el.setAttribute('aria-invalid', msg ? 'true' : 'false');
+                if (msg) el.dataset.vf = '1'; else delete el.dataset.vf;
+
+                if (!msg) { if (box) box.remove(); return; }
+
+                if (!box) {
+                    box = document.createElement('p');
+                    box.dataset.errFor = id;
+                    box.setAttribute('role', 'alert');
+                    box.className = 'flex items-center gap-1 mt-1 text-xs text-error';
+                    box.innerHTML = '<i data-lucide="circle-alert" class="size-3.5 shrink-0"></i><span></span>';
+                    el.insertAdjacentElement('afterend', box);
+                    lucide.createIcons();
+                }
+                box.querySelector('span').textContent = msg;
+            },
+
+            // Hapus semua error di dalam form/modal (id atau elemen)
+            clearErrors: function(scope) {
+                const root = typeof scope === 'string' ? document.getElementById(scope) : scope;
+                if (!root) return;
+                root.querySelectorAll('[data-vf="1"]').forEach(el => this.fieldError(el.id, ''));
+            },
+
+            // rules: [{ id, raw?: true, check: (nilai, elemen) => 'pesan error' atau '' }]
+            // raw: true = nilai tidak di-trim (untuk password)
+            validate: function(rules) {
+                let first = null;
+                rules.forEach(r => {
+                    const el = document.getElementById(r.id);
+                    if (!el) return;
+                    const msg = r.check(r.raw ? el.value : el.value.trim(), el) || '';
+                    this.fieldError(r.id, msg);
+                    if (msg && !first) first = el;
+                });
+                if (first) first.focus();
+                return !first;
+            },
+
+            // Error dari server: tampilkan di field yang cocok, selain itu toast
+            // map: [[/regex pada pesan/i, 'id-field'], ...]
+            handleServerError: function(err, map) {
+                const msg = (err && err.message) ? err.message : String(err || '');
+                const hit = (map || []).find(m => m[0].test(msg));
+                if (hit && document.getElementById(hit[1])) {
+                    this.fieldError(hit[1], msg);
+                    document.getElementById(hit[1]).focus();
+                } else {
+                    app.ui.toast(msg, "error");
+                }
+            },
+            
+            statusBadge: function(status) {
+                const cl = status === 'Hadir' ? 'badge-success' : status === 'Alpa' ? 'badge-error' : status === 'Izin' ? 'badge-info' : status === 'Sakit' ? 'badge-warning' : 'badge-ghost';
+                return `<span class="badge badge-soft ${cl}">${this.esc(status || '-')}</span>`;
+            },
+
+            loadMyAttendance: async function() {
+                const startEl = document.getElementById('my-start'), endEl = document.getElementById('my-end');
+                if (!startEl.value || !endEl.value) {
+                    const d = new Date(), pad = n => String(n).padStart(2, '0');
+                    startEl.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
+                    endEl.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                }
+                if (startEl.value > endEl.value) return app.ui.toast("Tanggal awal tidak boleh melebihi tanggal akhir", "error");
+
+                try {
+                    const res = await this.api('getMyAttendance', this.state.token, { startDate: startEl.value, endDate: endEl.value });
+                    const p = res.profile || {}, s = res.summary || {};
+
+                    document.getElementById('my-profile').textContent = `${p.full_name || ''} - NIS ${p.nis || '-'} - Kelas ${p.class_name || '-'}`;
+                    document.getElementById('my-today').innerHTML = this.statusBadge(res.today ? res.today.status : 'Belum diisi');
+                    document.getElementById('my-today-note').textContent = (res.today && res.today.notes) ? res.today.notes : '';
+
+                    document.getElementById('my-hadir').innerText = s.hadir || 0;
+                    document.getElementById('my-sakit').innerText = s.sakit || 0;
+                    document.getElementById('my-izin').innerText = s.izin || 0;
+                    document.getElementById('my-alpa').innerText = s.alpa || 0;
+                    document.getElementById('my-persen').innerText = (s.persentase || 0) + '%';
+
+                    const list = Array.isArray(res.records) ? res.records : [];
+                    document.getElementById('tbody-my').innerHTML = list.length
+                        ? list.map(r => `<tr><td>${this.esc(r.date)}</td><td>${this.statusBadge(r.status)}</td><td>${this.esc(r.notes || '-')}</td></tr>`).join('')
+                        : '<tr><td colspan="3" class="text-center text-base-content/60 p-6">Belum ada data absensi pada periode ini.</td></tr>';
+                } catch (err) { app.ui.toast(err.message, "error"); }
+            },
+
+            generateStudentAccounts: function() {
+                app.ui.confirm("Buat akun login untuk semua siswa aktif yang belum punya akun?\nUsername = NIS, password awal = NISN.", async () => {
+                    try {
+                        const res = await this.api('generateStudentAccounts', this.state.token);
+                        app.ui.toast(res.message, "success");
+                    } catch (err) { app.ui.toast(err.message, "error"); }
+                });
+            },
+
+            resetStudentAccount: function(studentId) {
+                app.ui.confirm("Buat atau reset akun siswa ini?\nUsername = NIS, password = NISN. Siswa diminta menggantinya saat login.", async () => {
+                    try {
+                        const res = await this.api('resetStudentAccount', this.state.token, studentId);
+                        app.ui.toast(res.message, "success");
+                    } catch (err) { app.ui.toast(err.message, "error"); }
+                });
+            },
+
+            filterTable: function(tbodyId, query) {
+                const q = query.toLowerCase();
+                document.querySelectorAll(`#${tbodyId} tr`).forEach(tr => { tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+            },
+
+            loadClassesForSelect: async function() {
+                try {
+                    if (!this.state.data.classes || this.state.data.classes.length === 0) {
+                        const res = await this.api('fetchMasterData', this.state.token, 'classes');
+                        this.state.data.classes = (res && Array.isArray(res.data)) ? res.data : [];
+                    }
+                    let options = this.state.data.classes
+                        .filter(c => c && isActiveVal(c.is_active))
+                        .map(c => `<option value="${this.esc(c.class_id)}">${this.esc(c.class_name)}</option>`).join('');
+                    document.getElementById('att-class').innerHTML = '<option disabled selected value="">-- Pilih Kelas --</option>' + options;
+                    document.getElementById('rep-class').innerHTML = '<option disabled selected value="">Semua Kelas</option>' + options;
+                } catch(err) { app.ui.toast(err.message, "error"); }
+            },
+
+            loadAttendanceForm: async function() {
+                const date = document.getElementById('att-date').value, classId = document.getElementById('att-class').value;
+                if (!date || !classId) return app.ui.toast("Pilih tanggal dan kelas", "error");
+                try {
+                    const res = await this.api('getAttendanceForm', this.state.token, date, classId);
+                    const list = (res && Array.isArray(res.data)) ? res.data : [];
+                    this.state.currentAttendanceForm = list;
+
+                    document.getElementById('att-entry-container').classList.remove('hidden');
+                    const tbody = document.getElementById('tbody-attendance');
+                    if (list.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-base-content/60 p-4">Tidak ada siswa terdaftar di kelas ini.</td></tr>';
+                        return;
+                    }
+
+                    const colors = { Hadir: 'checkbox-success', Sakit: 'checkbox-warning', Izin: 'checkbox-info', Alpa: 'checkbox-error' };
+                    tbody.innerHTML = list.map((s, idx) => {
+                        if (!s) return '';
+                        const sid = this.esc(s.student_id);
+                        const status = s.status || 'Belum Ada';
+                        const check = (val) => `<td class="text-center"><input type="checkbox" name="st_${sid}" value="${val}" ${status === val ? 'checked' : ''} onchange="app.selectStatus(this)" aria-label="${val}" class="checkbox checkbox-sm ${colors[val]}"></td>`;
+                        return `<tr class="hover:bg-base-200/60"><td>${idx + 1}</td><td>${this.esc(s.nis || '-')}</td><td class="font-medium">${this.esc(s.full_name || 'Tanpa Nama')}</td>${check('Hadir')}${check('Sakit')}${check('Izin')}${check('Alpa')}<td><input type="text" id="note_${sid}" value="${this.esc(s.notes || '')}" class="input input-sm w-full"></td></tr>`;
+                    }).join('');
+                } catch(err) { app.ui.toast(err.message, "error"); }
+            },
+
+            selectStatus: function(cb) {
+                if (!cb.checked) return;
+                document.querySelectorAll(`input[name="${cb.name}"]`).forEach(o => { if (o !== cb) o.checked = false; });
+            },
+
+            markAllAttendance: function(status) {
+                if (!Array.isArray(this.state.currentAttendanceForm)) return;
+                this.state.currentAttendanceForm.forEach(s => {
+                    if (s && s.student_id) {
+                        document.querySelectorAll(`input[name="st_${s.student_id}"]`).forEach(o => { o.checked = (o.value === status); });
+                    }
+                });
+            },
+
+            saveAttendance: async function() {
+                const date = document.getElementById('att-date').value, classId = document.getElementById('att-class').value;
+                if (!Array.isArray(this.state.currentAttendanceForm)) return;
+
+                const payload = this.state.currentAttendanceForm.reduce((acc, s) => {
+                    if (s && s.student_id) {
+                        const r = document.querySelector(`input[name="st_${s.student_id}"]:checked`);
+                        const noteElem = document.getElementById(`note_${s.student_id}`);
+                        if (r) {
+                            acc.push({ student_id: s.student_id, status: r.value, notes: noteElem ? noteElem.value : '' });
+                        }
+                    }
+                    return acc;
+                }, []);
+
+                if (payload.length === 0) return app.ui.toast("Tidak ada data absensi untuk disimpan", "error");
+
+                const btn = document.getElementById('btn-save-att');
+                btn.disabled = true; btn.innerHTML = '<span class="loading loading-spinner loading-sm"></span> Menyimpan...';
+
+                try {
+                    const res = await this.api('submitAttendanceBatch', this.state.token, date, classId, payload);
+                    app.ui.toast(res.message || "Data berhasil disimpan", "success");
+                } catch(err) { app.ui.toast(err.message, "error"); }
+                finally { btn.disabled = false; btn.innerHTML = '<i data-lucide="save" class="size-4"></i> Simpan Data Absensi'; lucide.createIcons(); }
+            },
+
+            generateReport: async function() {
+                const f = { startDate: document.getElementById('rep-start').value, endDate: document.getElementById('rep-end').value, classId: document.getElementById('rep-class').value };
+                try {
+                    const res = await this.api('getReportData', this.state.token, f);
+                    const tbody = document.getElementById('tbody-reports');
+                    const summary = document.getElementById('rep-summary');
+
+                    document.getElementById('print-subtitle').innerText = `Periode: ${f.startDate || '-'} s.d ${f.endDate || '-'}`;
+
+                    const list = (res && Array.isArray(res.data)) ? res.data : [];
+                    if (list.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-base-content/60">Tidak ada data ditemukan.</td></tr>';
+                        summary.classList.add('hidden'); return;
+                    }
+
+                    let stats = { h:0, s:0, i:0, a:0 };
+                    tbody.innerHTML = list.map(r => {
+                        if (!r) return '';
+                        if (r.status === 'Hadir') stats.h++;
+                        else if (r.status === 'Sakit') stats.s++;
+                        else if (r.status === 'Izin') stats.i++;
+                        else stats.a++;
+
+                        const cl = r.status === 'Hadir' ? 'badge-success' : r.status === 'Alpa' ? 'badge-error' : r.status === 'Izin' ? 'badge-info' : 'badge-warning';
+                        return `<tr><td>${this.esc(r.date || '-')}</td><td>${this.esc(r.nis || '-')}</td><td class="font-medium">${this.esc(r.student_name || 'Tanpa Nama')}</td><td>${this.esc(r.class_name || '-')}</td><td><span class="badge badge-soft badge-sm ${cl}">${this.esc(r.status || '-')}</span></td><td>${this.esc(r.notes || '-')}</td></tr>`;
+                    }).join('');
+
+                    const total = list.length;
+                    document.getElementById('sum-total').innerText = total;
+                    document.getElementById('sum-hadir').innerText = stats.h;
+                    document.getElementById('sum-sakit').innerText = stats.s;
+                    document.getElementById('sum-izin').innerText = stats.i;
+                    document.getElementById('sum-alpa').innerText = stats.a;
+                    document.getElementById('sum-persentase').innerText = total > 0 ? ((stats.h / total) * 100).toFixed(1) + '%' : '0%';
+                    summary.classList.remove('hidden');
+
+                } catch(err) { app.ui.toast(err.message, "error"); }
+            },
+
+            ui: {
+                openSidebar: () => { document.getElementById('app-drawer').checked = true; },
+                closeSidebar: () => { document.getElementById('app-drawer').checked = false; },
+                toggleSidebar: () => { const d = document.getElementById('app-drawer'); d.checked = !d.checked; },
+                showLoader: () => document.getElementById('global-loader').classList.remove('hidden'),
+                hideLoader: () => document.getElementById('global-loader').classList.add('hidden'),
+                openModal: (id) => { const m = document.getElementById(id); app.clearErrors(m); m.showModal(); },
+                closeModal: (id) => document.getElementById(id).close(),
+                confirm: (msg, onOk) => {
+                    document.getElementById('confirm-msg').textContent = msg;
+                    document.getElementById('confirm-ok').onclick = () => { app.ui.closeModal('modal-confirm'); onOk(); };
+                    app.ui.openModal('modal-confirm');
+                },
+                toast: (msg, type = 'info') => {
+                    const icons = { success: 'circle-check', error: 'circle-x', info: 'info' };
+                    const c = document.getElementById('toast-container');
+                    const t = document.createElement('div');
+                    t.setAttribute('role', 'alert');
+                    t.className = `alert alert-${icons[type] ? type : 'info'} shadow-lg max-w-sm transition-all duration-300 opacity-0 translate-y-4`;
+
+                    const icon = document.createElement('i');
+                    icon.setAttribute('data-lucide', icons[type] || 'info');
+                    icon.className = 'size-5 shrink-0';
+
+                    const text = document.createElement('span');
+                    text.textContent = msg;
+
+                    t.append(icon, text);
+                    c.appendChild(t);
+                    lucide.createIcons();
+
+                    setTimeout(() => t.classList.remove('opacity-0', 'translate-y-4'), 10);
+                    setTimeout(() => { t.classList.add('opacity-0', 'translate-y-4'); setTimeout(() => t.remove(), 300); }, 4000);
+                }
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            ['input', 'change'].forEach(ev => document.addEventListener(ev, e => {
+                const el = e.target;
+                if (el && el.dataset && el.dataset.vf === '1') app.fieldError(el.id, '');
+            }));
+            app.initAuth();
+        });
+    </script>
+</body>
+</html>
