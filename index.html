@@ -180,9 +180,9 @@
                         <div class="flex justify-between items-center">
                             <h2 class="text-2xl font-bold">Master Data Siswa</h2>
                             <div class="flex gap-2">
-    <button onclick="app.generateStudentAccounts()" class="btn btn-outline btn-sm"><i data-lucide="key-round" class="size-4"></i> Buat Akun Siswa</button>
-    <button onclick="app.openStudentModal()" class="btn btn-primary btn-sm"><i data-lucide="plus" class="size-4"></i> Tambah Siswa</button>
-</div>
+                                <button onclick="app.generateStudentAccounts()" class="btn btn-outline btn-sm"><i data-lucide="key-round" class="size-4"></i> Buat Akun Siswa</button>
+                                <button onclick="app.openStudentModal()" class="btn btn-primary btn-sm"><i data-lucide="plus" class="size-4"></i> Tambah Siswa</button>
+                            </div>
                         </div>
                         <div class="card bg-base-100 border border-base-300 overflow-hidden">
                             <div class="p-4 border-b border-base-300 bg-base-200/60">
@@ -565,6 +565,11 @@
         const app = {
             state: { token: localStorage.getItem('eduabsen_token'), user: JSON.parse(localStorage.getItem('eduabsen_user')), data: { classes: [] }, currentAttendanceForm: [] },
             charts: {},
+            
+            today: function() {
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+},
 
             api: function(funcName, ...args) {
                 return new Promise((resolve, reject) => {
@@ -577,6 +582,15 @@
                             app.ui.toast("Sesi berakhir, silakan login kembali", "error");
                             setTimeout(() => window.location.reload(), 1200);
                         }
+                        if (msg.indexOf('MUST_CHANGE_PASSWORD') !== -1) {
+    if (app.state.user) {
+        app.state.user.must_change_password = true;
+        localStorage.setItem('eduabsen_user', JSON.stringify(app.state.user));
+    }
+    app.navigate('settings');
+    reject(new Error('Ganti password bawaan Anda terlebih dahulu.'));
+    return;
+}
                         reject(new Error(msg || "Gagal terhubung ke server"));
                     };
                     google.script.run
@@ -590,6 +604,8 @@
             },
 
             navigate: function(viewId) {
+                const cu = this.state.user || {};
+                if (cu.must_change_password && viewId !== 'settings') viewId = 'settings';
                 const adminViews = ['students', 'classes', 'teachers'];
                 if (adminViews.includes(viewId) && !(this.state.user && this.state.user.role === 'admin')) return;
                 const role = this.state.user && this.state.user.role;
@@ -606,6 +622,7 @@
                 });
 
                 if (viewId === 'dashboard') this.loadDashboard();
+                if (viewId === 'settings') this.loadSettings();
                 if (viewId === 'students') this.loadStudents();
                 if (viewId === 'classes') this.loadClassesMaster();
                 if (viewId === 'teachers') this.loadTeachers();
@@ -615,7 +632,11 @@
 
             initAuth: function() {
                 if (this.state.token && this.state.user) this.setupUserEnv();
-                else { document.getElementById('view-login').classList.remove('hidden'); document.getElementById('view-app').classList.add('hidden'); }
+                else {
+                    document.getElementById('view-login').classList.remove('hidden');
+                    document.getElementById('view-app').classList.add('hidden');
+                    this.loadPublicSettings();
+                }
 
                 document.getElementById('login-form').addEventListener('submit', async (e) => {
                     e.preventDefault();
@@ -691,7 +712,7 @@
                 document.querySelectorAll('.staff-only').forEach(el => el.classList.toggle('hidden', isStudent));
                 document.querySelectorAll('.student-only').forEach(el => el.classList.toggle('hidden', !isStudent));
 
-                document.getElementById('att-date').value = new Date().toISOString().split('T')[0];
+                document.getElementById('att-date').value = this.today();
                 this.refreshSettings();
                 this.navigate(u.must_change_password ? 'settings' : (isStudent ? 'myattendance' : 'dashboard'));
                 if (u.must_change_password) app.ui.toast("Demi keamanan, ganti password bawaan Anda sekarang.", "info");
@@ -733,6 +754,7 @@
                     if (!tbody) return;
 
                     const list = (res && Array.isArray(res.data)) ? res.data : [];
+                    this.state.data.students = list;
                     if (list.length === 0) {
                         tbody.innerHTML = '<tr><td colspan="4" class="text-center text-base-content/60 p-4">Tidak ada data siswa.</td></tr>';
                         return;
@@ -744,53 +766,68 @@
                         const nisn = this.esc(s.nisn || '-');
                         const name = this.esc(s.full_name || 'Tanpa Nama');
                         const gender = this.esc(s.gender || '-');
-                        return `<tr><td>${nis} / ${nisn}</td><td class="font-medium">${name}</td><td>${gender}</td><td>${this.badge(isActiveVal(s.is_active))}</td><td><button type="button" onclick="app.resetStudentAccount('${this.esc(s.student_id)}')" class="btn btn-ghost btn-xs text-primary">Reset Akun</button></td></tr>`;
-                    }).join('');
+                        const sid = this.esc(s.student_id);
+                        return `<tr><td>${nis} / ${nisn}</td><td class="font-medium">${name}</td><td>${gender}</td><td>${this.badge(isActiveVal(s.is_active))}</td><td class="whitespace-nowrap"><button type="button" onclick="app.openStudentModal('${sid}')" class="btn btn-ghost btn-xs text-primary">Edit</button><button type="button" onclick="app.resetStudentAccount('${sid}')" class="btn btn-ghost btn-xs text-primary">Reset Akun</button></td></tr>`;                    }).join('');
                 } catch(err) { app.ui.toast(err.message, "error"); }
             },
 
             // Ambil data kelas terbaru dari server lalu isi dropdown kelas di form siswa
-            openStudentModal: async function() {
+            openStudentModal: async function(studentId) {
                 try {
-                    const res = await this.api('fetchMasterData', this.state.token, 'classes');
-                    const list = (res && Array.isArray(res.data)) ? res.data : [];
-                    this.state.data.classes = list;
+                    const s = studentId ? (this.state.data.students || []).find(x => x && x.student_id === studentId) : null;
 
-                    const activeClasses = list.filter(c => c && isActiveVal(c.is_active));
-                    if (activeClasses.length === 0) {
-                        return app.ui.toast("Belum ada data kelas aktif. Tambahkan kelas terlebih dahulu.", "error");
-                    }
+        if (!s) {
+            const res = await this.api('fetchMasterData', this.state.token, 'classes');
+            const list = (res && Array.isArray(res.data)) ? res.data : [];
+            this.state.data.classes = list;
+            const activeClasses = list.filter(c => c && isActiveVal(c.is_active));
+            if (activeClasses.length === 0) {
+                return app.ui.toast("Belum ada data kelas aktif. Tambahkan kelas terlebih dahulu.", "error");
+            }
+            document.getElementById('fs-class').innerHTML = '<option disabled selected value="">-- Pilih Kelas --</option>' +
+                activeClasses.map(c => `<option value="${this.esc(c.class_id)}">${this.esc(c.class_name)} (${this.esc(c.academic_year || '-')})</option>`).join('');
+        }
 
-                    const options = activeClasses
-                        .map(c => `<option value="${this.esc(c.class_id)}">${this.esc(c.class_name)} (${this.esc(c.academic_year || '-')})</option>`)
-                        .join('');
-                    document.getElementById('fs-class').innerHTML = '<option disabled selected value="">-- Pilih Kelas --</option>' + options;
-                    document.getElementById('form-student').reset();
-                    app.ui.openModal('modal-student');
-                } catch(err) { app.ui.toast(err.message, "error"); }
-            },
+        document.getElementById('form-student').reset();
+        document.getElementById('fs-id').value = s ? s.student_id : '';
+        document.querySelector('#modal-student h3').textContent = s ? 'Edit Siswa' : 'Tambah Siswa';
+        document.getElementById('fs-nis').value = s ? (s.nis || '') : '';
+        document.getElementById('fs-nisn').value = s ? (s.nisn || '') : '';
+        document.getElementById('fs-name').value = s ? (s.full_name || '') : '';
+        document.getElementById('fs-gender').value = s ? (s.gender || 'L') : 'L';
+        // Pindah kelas belum didukung lewat form ini, jadi disembunyikan saat edit
+        document.getElementById('fs-class').closest('fieldset').classList.toggle('hidden', !!s);
+        app.ui.openModal('modal-student');
+    } catch (err) { app.ui.toast(err.message, "error"); }
+},
 
             submitStudent: async function() {
-                const ok = this.validate([
-                    { id: 'fs-nis', check: v => !v ? 'NIS wajib diisi' : (v.length > 20 ? 'NIS maksimal 20 karakter' : '') },
-                    { id: 'fs-nisn', check: v => !v ? 'NISN wajib diisi' : (!/^\d{10}$/.test(v) ? 'NISN harus 10 digit angka' : '') },
-                    { id: 'fs-name', check: v => !v ? 'Nama lengkap wajib diisi' : (v.length < 3 ? 'Nama minimal 3 karakter' : '') },
-                    { id: 'fs-class', check: v => !v ? 'Pilih kelas terlebih dahulu' : '' }
-                ]);
-                if (!ok) return;
+    const id = document.getElementById('fs-id').value;
+    const ok = this.validate([
+        { id: 'fs-nis', check: v => !v ? 'NIS wajib diisi' : (v.length > 20 ? 'NIS maksimal 20 karakter' : '') },
+        { id: 'fs-nisn', check: v => !v ? 'NISN wajib diisi' : (!/^\d{10}$/.test(v) ? 'NISN harus 10 digit angka' : '') },
+        { id: 'fs-name', check: v => !v ? 'Nama lengkap wajib diisi' : (v.length < 3 ? 'Nama minimal 3 karakter' : '') },
+        { id: 'fs-class', check: v => (!id && !v) ? 'Pilih kelas terlebih dahulu' : '' }
+    ]);
+    if (!ok) return;
 
-                try {
-                    await this.api('saveStudent', this.state.token, {
-                        student_id: document.getElementById('fs-id').value,
-                        nis: document.getElementById('fs-nis').value.trim(),
-                        nisn: document.getElementById('fs-nisn').value.trim(),
-                        full_name: document.getElementById('fs-name').value.trim(),
-                        gender: document.getElementById('fs-gender').value,
-                        class_id: classId
-                    });
-                    app.ui.toast("Tersimpan", "success"); app.ui.closeModal('modal-student'); document.getElementById('form-student').reset(); this.loadStudents();
-                } catch(err) { this.handleServerError(err, [[/NIS atau NISN/i, 'fs-nis']]); }
-            },
+    const payload = {
+        student_id: id,
+        nis: document.getElementById('fs-nis').value.trim(),
+        nisn: document.getElementById('fs-nisn').value.trim(),
+        full_name: document.getElementById('fs-name').value.trim(),
+        gender: document.getElementById('fs-gender').value
+    };
+    if (!id) payload.class_id = document.getElementById('fs-class').value;
+
+    try {
+        const res = await this.api('saveStudent', this.state.token, payload);
+        app.ui.toast(res.message || "Tersimpan", "success");
+        app.ui.closeModal('modal-student');
+        document.getElementById('form-student').reset();
+        this.loadStudents();
+    } catch(err) { this.handleServerError(err, [[/NIS atau NISN/i, 'fs-nis']]); }
+},
 
             loadClassesMaster: async function() {
                 try {
@@ -1007,7 +1044,7 @@
                 this.clearErrors('content-settings');
                 const u = this.state.user || {};
                 document.getElementById('set-account-info').textContent =
-                    `${u.full_name || u.username} (${u.username}) - ${({ admin: 'Administrator', guru: 'Guru', siswa: 'Siswa' })[u.role] || u.role}
+                    `${u.full_name || u.username} (${u.username}) - ${({ admin: 'Administrator', guru: 'Guru', siswa: 'Siswa' })[u.role] || u.role}`;
                 document.getElementById('form-password').reset();
 
                 try {
@@ -1068,8 +1105,8 @@
 
                 const ok = this.validate([
                     { id: 'pw-old', raw: true, check: v => !v ? 'Password lama wajib diisi' : '' },
-                    { id: 'pw-new', raw: true, check: v => !v ? 'Password baru wajib diisi' : (v.length < 6 ? 'Minimal 6 karakter' : (v === oldVal() ? 'Harus berbeda dari password lama' : '')) },
-                    { id: 'pw-confirm', raw: true, check: v => v !== newVal() ? 'Konfirmasi tidak sama dengan password baru' : '' }
+                    { id: 'pw-new', raw: true, check: v => !v ? 'Password baru wajib diisi' : (v.length < 6 ? 'Minimal 6 karakter' : (v === oldPw ? 'Harus berbeda dari password lama' : '')) },
+                    { id: 'pw-confirm', raw: true, check: v => v !== newPw ? 'Konfirmasi tidak sama dengan password baru' : '' }
                 ]);
                 if (!ok) return;
                 
@@ -1206,12 +1243,15 @@
                         const res = await this.api('fetchMasterData', this.state.token, 'classes');
                         this.state.data.classes = (res && Array.isArray(res.data)) ? res.data : [];
                     }
-                    let options = this.state.data.classes
-                        .filter(c => c && isActiveVal(c.is_active))
+                    
+                    const u = this.state.user || {};
+                    const mine = u.role === 'guru' ? this.parseClassIds(u.assigned_classes) : null;
+                    const options = this.state.data.classes
+                        .filter(c => c && isActiveVal(c.is_active) && (!mine || mine.includes(c.class_id)))
                         .map(c => `<option value="${this.esc(c.class_id)}">${this.esc(c.class_name)}</option>`).join('');
                     document.getElementById('att-class').innerHTML = '<option disabled selected value="">-- Pilih Kelas --</option>' + options;
-                    document.getElementById('rep-class').innerHTML = '<option disabled selected value="">Semua Kelas</option>' + options;
-                } catch(err) { app.ui.toast(err.message, "error"); }
+                    document.getElementById('rep-class').innerHTML = '<option value="" selected>Semua Kelas</option>' + options;
+                    } catch(err) { app.ui.toast(err.message, "error"); }
             },
 
             loadAttendanceForm: async function() {

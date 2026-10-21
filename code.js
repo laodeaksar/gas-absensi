@@ -213,23 +213,34 @@ function updateRecord(sheetName, idColumn, idValue, updateObj) {
 // ==========================================
 // C. AUTENTIKASI
 // ==========================================
+const LOGIN_MAX_FAILS = 5;
+const LOGIN_LOCK_SECONDS = 900; // 15 menit
+
 function login(username, password) {
   try {
-    const users = getSheetData('Users');
-    const user = users.find(u => u && String(u.username) === String(username) && isTrue(u.is_active));
-    if (!user) throw new Error("Username atau password salah.");
+    username = String(username || '').trim();
+    password = String(password || '');
+    const cache = CacheService.getScriptCache();
+    const failKey = 'loginfail:' + hashPassword(username.toLowerCase(), 'lf').substring(0, 32);
+    const fails = Number(cache.get(failKey) || 0);
+    if (fails >= LOGIN_MAX_FAILS) {
+      throw new Error("Terlalu banyak percobaan gagal. Coba lagi dalam 15 menit.");
+    }
 
-    const hashedInput = hashPassword(password, user.password_salt);
-    if (hashedInput !== user.password_hash) throw new Error("Username atau password salah.");
+    const user = getSheetData('Users').find(u => u && String(u.username) === username && isTrue(u.is_active));
+    if (!user || hashPassword(password, user.password_salt) !== user.password_hash) {
+      cache.put(failKey, String(fails + 1), LOGIN_LOCK_SECONDS);
+      throw new Error("Username atau password salah.");
+    }
+    cache.remove(failKey);
 
     const token = generateUniqueId();
-    const cache = CacheService.getScriptCache();
     const sessionData = {
       user_id: user.user_id, username: user.username, full_name: user.full_name || 'Pengguna',
       role: user.role, assigned_classes: user.assigned_classes || '[]', issued_at: Date.now(),
       student_id: user.student_id || '', must_change_password: isTrue(user.must_change_password)
     };
-    cache.put(token, JSON.stringify(sessionData), 21600); // 6 jam
+    cache.put(token, JSON.stringify(sessionData), 21600);
     return { success: true, token: token, user: sessionData };
   } catch (e) {
     return { success: false, message: e.message };
@@ -241,17 +252,19 @@ function logout(token) {
   return { success: true };
 }
 
-function requireAuth(token, requireAdmin = false, allowStudent = false) {
+function requireAuth(token, requireAdmin = false, allowStudent = false, allowPending = false) {
   if (!token) throw new Error("AUTH_FAILED");
-  const sessionStr = CacheService.getScriptCache().get(token);
+  const cache = CacheService.getScriptCache();
+  const sessionStr = cache.get(token);
   if (!sessionStr) throw new Error("AUTH_FAILED");
   const user = JSON.parse(sessionStr);
-  // Sesi dibatalkan jika akun diubah/dinonaktifkan/direset setelah login
-  const revokedAt = CacheService.getScriptCache().get('revoke:' + user.user_id);
+
+  const revokedAt = cache.get('revoke:' + user.user_id);
   if (revokedAt && Number(revokedAt) > Number(user.issued_at || 0)) {
-    CacheService.getScriptCache().remove(token);
+    cache.remove(token);
     throw new Error("AUTH_FAILED");
   }
+  if (user.must_change_password && !allowPending) throw new Error("MUST_CHANGE_PASSWORD");
   if (user.role === 'siswa' && !allowStudent) throw new Error("FORBIDDEN");
   if (requireAdmin && user.role !== 'admin') throw new Error("FORBIDDEN");
   return user;
@@ -305,43 +318,84 @@ function saveStudent(token, studentData) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    // Samakan tipe data (teks) agar perbandingan & leading zero aman
-    studentData.nis = String(studentData.nis || '').trim();
-    studentData.nisn = String(studentData.nisn || '').trim();
-    if (studentData.parent_phone !== undefined) studentData.parent_phone = String(studentData.parent_phone);
+    const FIELDS = ['nis', 'nisn', 'full_name', 'gender', 'birth_place', 'birth_date', 'address', 'parent_name', 'parent_phone'];
+    const clean = {};
+    FIELDS.forEach(k => {
+      if (studentData[k] !== undefined && studentData[k] !== null) clean[k] = String(studentData[k]).trim();
+    });
+    if (studentData.is_active !== undefined) clean.is_active = isTrue(studentData.is_active);
 
+    const id = String(studentData.student_id || '');
     const students = getSheetData('Students');
-    const isDuplicate = students.some(s => s &&
-      ((studentData.nis && String(s.nis) === studentData.nis) || (studentData.nisn && String(s.nisn) === studentData.nisn)) &&
-      s.student_id !== studentData.student_id);
+    const existing = id ? students.find(s => s && s.student_id === id) : null;
+    if (id && !existing) throw new Error("Data siswa tidak ditemukan.");
+
+    const nis = clean.nis !== undefined ? clean.nis : String(existing ? existing.nis : '');
+    const nisn = clean.nisn !== undefined ? clean.nisn : String(existing ? existing.nisn : '');
+    if (!nis) throw new Error("NIS wajib diisi.");
+    if (!existing && !clean.full_name) throw new Error("Nama lengkap wajib diisi.");
+
+    const isDuplicate = students.some(s => s && s.student_id !== id &&
+      ((nis && String(s.nis) === nis) || (nisn && String(s.nisn) === nisn)));
     if (isDuplicate) throw new Error("NIS atau NISN sudah digunakan.");
 
-    studentData.updated_at = new Date().toISOString();
-    if (studentData.student_id) {
-      updateRecord('Students', 'student_id', studentData.student_id, studentData);
-    } else {
-      studentData.student_id = 'STD-' + generateUniqueId().substring(0, 8).toUpperCase();
-      studentData.created_at = studentData.updated_at;
-      studentData.is_active = true;
-      insertRecord('Students', studentData);
+    const now = new Date().toISOString();
+    clean.updated_at = now;
+    let warning = '';
 
-      // Jika frontend mengirim class_id, langsung masukkan siswa ke kelas tsb
+    if (existing) {
+      updateRecord('Students', 'student_id', id, clean);
+      warning = syncStudentAccount_(id);
+    } else {
+      let cls = null;
       if (studentData.class_id) {
-        const cls = getSheetData('Classes').find(c => c && c.class_id === studentData.class_id);
+        cls = getSheetData('Classes').find(c => c && c.class_id === studentData.class_id);
+        if (!cls) throw new Error("Kelas tidak ditemukan.");
+      }
+      clean.student_id = 'STD-' + generateUniqueId().substring(0, 8).toUpperCase();
+      clean.created_at = now;
+      clean.is_active = true;
+      insertRecord('Students', clean);
+
+      if (cls) {
         insertRecord('StudentClassHistory', {
           history_id: 'HST-' + generateUniqueId().substring(0, 8).toUpperCase(),
-          student_id: studentData.student_id, class_id: studentData.class_id,
-          academic_year: cls ? cls.academic_year : '', start_date: studentData.updated_at,
-          end_date: '', is_active: true, created_at: studentData.updated_at
+          student_id: clean.student_id, class_id: cls.class_id,
+          academic_year: cls.academic_year || '', start_date: now,
+          end_date: '', is_active: true, created_at: now
         });
       }
     }
-    return { success: true, message: "Data siswa berhasil disimpan." };
+    return { success: true, message: "Data siswa berhasil disimpan." + (warning ? " " + warning : "") };
   } catch (e) {
     return { success: false, message: e.message };
   } finally {
     lock.releaseLock();
   }
+}
+
+// Samakan akun login siswa dengan data Students (NIS, nama, status aktif)
+function syncStudentAccount_(studentId) {
+  const s = getSheetData('Students').find(x => x && x.student_id === studentId);
+  const users = getSheetData('Users').filter(Boolean);
+  const u = users.find(x => x.student_id === studentId);
+  if (!s || !u) return '';
+
+  const nis = String(s.nis || '').trim();
+  const patch = {
+    full_name: s.full_name || u.full_name,
+    is_active: isTrue(s.is_active),
+    updated_at: new Date().toISOString()
+  };
+  let warning = '';
+  if (nis && nis !== String(u.username)) {
+    const clash = users.some(x => x.user_id !== u.user_id && String(x.username).toLowerCase() === nis.toLowerCase());
+    if (clash) warning = "Username akun siswa tidak diubah karena NIS baru bentrok dengan akun lain.";
+    else patch.username = nis;
+  }
+  updateRecord('Users', 'user_id', u.user_id, patch);
+  CacheService.getScriptCache().put('revoke:' + u.user_id, String(Date.now()), 21600);
+  return warning;
 }
 
 // Manajemen guru (khusus admin). Buat baru jika user_id kosong, ubah jika ada.
@@ -503,43 +557,88 @@ function getAttendanceForm(token, date, classId) {
 }
 
 function submitAttendanceBatch(token, date, classId, attendanceData) {
-  const user = requireAuth(token);
-  assertAttendanceEditable(user, date);
-  if (!Array.isArray(attendanceData)) throw new Error("Data absensi tidak valid.");
+  let user;
+  try {
+    user = requireAuth(token);
+    assertAttendanceEditable(user, date);
+    if (!Array.isArray(attendanceData)) throw new Error("Data absensi tidak valid.");
+    if (user.role === 'guru') {
+      let assigned = [];
+      try { assigned = JSON.parse(user.assigned_classes || "[]"); } catch (e) {}
+      if (assigned.indexOf(classId) === -1) throw new Error("Anda tidak memiliki akses ke kelas ini.");
+    }
+    if (!getSheetData('Classes').some(c => c && c.class_id === classId)) throw new Error("Kelas tidak ditemukan.");
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
 
+  const VALID = ['Hadir', 'Sakit', 'Izin', 'Alpa'];
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
-
   try {
+    const members = {};
+    getSheetData('StudentClassHistory').forEach(h => {
+      if (h && h.class_id === classId && isTrue(h.is_active)) members[h.student_id] = true;
+    });
+
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Attendance');
-    const existing = getSheetData('Attendance');
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const col = {};
+    headers.forEach((h, i) => { col[h] = i; });
+
+    const tz = Session.getScriptTimeZone();
+    const dateStr = v => (v instanceof Date ? Utilities.formatDate(v, tz, 'yyyy-MM-dd') : dateOnly(v));
+    const rows = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, lastCol).getValues() : [];
+
+    const rowIdx = {};
+    rows.forEach((r, i) => {
+      if (dateStr(r[col.attendance_date]) === date && r[col.class_id] === classId) rowIdx[r[col.student_id]] = i;
+    });
+
     const now = new Date().toISOString();
-
-    const existMap = {};
-    existing.filter(a => a && dateOnly(a.attendance_date) === date && a.class_id === classId)
-            .forEach(a => { if (a && a.student_id) existMap[a.student_id] = a; });
-
-    const rowsToInsert = [];
+    const touched = [], inserts = [];
+    let skipped = 0;
 
     attendanceData.forEach(entry => {
-      if (!entry || !entry.student_id) return;
-      if (existMap[entry.student_id]) {
-        updateRecord('Attendance', 'attendance_id', existMap[entry.student_id].attendance_id, {
-          status: entry.status || 'Belum Ada', notes: entry.notes || '', recorded_by: user.user_id, updated_at: now
-        });
+      if (!entry || !entry.student_id || !members[entry.student_id] || VALID.indexOf(entry.status) === -1) {
+        skipped++; return;
+      }
+      const notes = String(entry.notes || '').substring(0, 200);
+      const i = rowIdx[entry.student_id];
+      if (i !== undefined) {
+        rows[i][col.status] = entry.status;
+        rows[i][col.notes] = notes;
+        rows[i][col.recorded_by] = user.user_id;
+        rows[i][col.updated_at] = now;
+        touched.push(i);
       } else {
-        rowsToInsert.push([
-          'ATT-' + generateUniqueId().substring(0, 8).toUpperCase(), date, entry.student_id, classId,
-          entry.status || 'Belum Ada', entry.notes || '', user.user_id, now, now
-        ]);
+        const r = headers.map(() => '');
+        r[col.attendance_id] = 'ATT-' + generateUniqueId().substring(0, 8).toUpperCase();
+        r[col.attendance_date] = date;
+        r[col.student_id] = entry.student_id;
+        r[col.class_id] = classId;
+        r[col.status] = entry.status;
+        r[col.notes] = notes;
+        r[col.recorded_by] = user.user_id;
+        r[col.created_at] = now;
+        r[col.updated_at] = now;
+        inserts.push(r);
       }
     });
 
-    if (rowsToInsert.length > 0) {
-      const startRow = sheet.getLastRow() + 1;
-      sheet.getRange(startRow, 1, rowsToInsert.length, rowsToInsert[0].length).setValues(rowsToInsert);
+    if (touched.length > 0) {
+      const lo = Math.min.apply(null, touched), hi = Math.max.apply(null, touched);
+      sheet.getRange(lo + 2, 1, hi - lo + 1, lastCol).setValues(rows.slice(lo, hi + 1));
     }
-    return { success: true, message: "Data absensi berhasil disimpan." };
+    if (inserts.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, inserts.length, lastCol).setValues(inserts);
+    }
+    return {
+      success: true,
+      message: "Data absensi berhasil disimpan." + (skipped ? " " + skipped + " baris dilewati (tidak valid)." : "")
+    };
   } catch (e) {
     return { success: false, message: e.message };
   } finally {
@@ -551,46 +650,60 @@ function submitAttendanceBatch(token, date, classId, attendanceData) {
 // F. DASHBOARD & LAPORAN
 // ==========================================
 function getDashboardStats(token) {
-  requireAuth(token);
-  const today = todayStr(0);
+  try {
+    const user = requireAuth(token);
+    const today = todayStr(0);
 
-  const students = getSheetData('Students').filter(s => s && isTrue(s.is_active)).length;
-  const classes = getSheetData('Classes').filter(c => c && isTrue(c.is_active)).length;
-  const allAtt = getSheetData('Attendance').filter(Boolean);
+    let assigned = null;
+    if (user.role === 'guru') {
+      try { assigned = JSON.parse(user.assigned_classes || '[]'); } catch (e) { assigned = []; }
+    }
+    const inScope = id => !assigned || assigned.indexOf(id) !== -1;
 
-  let stats = { totalStudents: students, totalClasses: classes, hadir: 0, sakit: 0, izin: 0, alpa: 0, persentase: 0 };
+    let totalStudents, totalClasses;
+    if (assigned) {
+      totalClasses = getSheetData('Classes').filter(c => c && isTrue(c.is_active) && inScope(c.class_id)).length;
+      const ids = {};
+      getSheetData('StudentClassHistory').forEach(h => {
+        if (h && isTrue(h.is_active) && inScope(h.class_id)) ids[h.student_id] = true;
+      });
+      totalStudents = Object.keys(ids).length;
+    } else {
+      totalStudents = getSheetData('Students').filter(s => s && isTrue(s.is_active)).length;
+      totalClasses = getSheetData('Classes').filter(c => c && isTrue(c.is_active)).length;
+    }
 
-  allAtt.filter(a => a && dateOnly(a.attendance_date) === today).forEach(a => {
-    if (a.status === 'Hadir') stats.hadir++;
-    else if (a.status === 'Sakit') stats.sakit++;
-    else if (a.status === 'Izin') stats.izin++;
-    else if (a.status === 'Alpa') stats.alpa++;
-  });
+    const allAtt = getSheetData('Attendance').filter(a => a && inScope(a.class_id));
+    const stats = { totalStudents: totalStudents, totalClasses: totalClasses, hadir: 0, sakit: 0, izin: 0, alpa: 0, persentase: 0 };
 
-  const totalAtt = stats.hadir + stats.sakit + stats.izin + stats.alpa;
-  if (totalAtt > 0) stats.persentase = ((stats.hadir / totalAtt) * 100).toFixed(1);
+    allAtt.filter(a => dateOnly(a.attendance_date) === today).forEach(a => {
+      if (a.status === 'Hadir') stats.hadir++;
+      else if (a.status === 'Sakit') stats.sakit++;
+      else if (a.status === 'Izin') stats.izin++;
+      else if (a.status === 'Alpa') stats.alpa++;
+    });
+    const totalAtt = stats.hadir + stats.sakit + stats.izin + stats.alpa;
+    if (totalAtt > 0) stats.persentase = ((stats.hadir / totalAtt) * 100).toFixed(1);
 
-  const chartData = { labels: [], hadir: [], tidakHadir: [] };
-  const sevenDaysAgo = todayStr(-7);
+    const sevenDaysAgo = todayStr(-7);
+    const dateMap = {};
+    allAtt.forEach(a => {
+      const d = dateOnly(a.attendance_date);
+      if (!d || d < sevenDaysAgo) return;
+      if (!dateMap[d]) dateMap[d] = { h: 0, t: 0 };
+      if (a.status === 'Hadir') dateMap[d].h++; else dateMap[d].t++;
+    });
+    const chartData = { labels: [], hadir: [], tidakHadir: [] };
+    Object.keys(dateMap).sort().forEach(d => {
+      chartData.labels.push(d);
+      chartData.hadir.push(dateMap[d].h);
+      chartData.tidakHadir.push(dateMap[d].t);
+    });
 
-  const recentAtt = allAtt.filter(a => a && dateOnly(a.attendance_date) >= sevenDaysAgo);
-  const dateMap = {};
-  recentAtt.forEach(a => {
-    const attDate = dateOnly(a.attendance_date);
-    if (!attDate) return;
-    if (!dateMap[attDate]) dateMap[attDate] = { h: 0, t: 0 };
-    if (a.status === 'Hadir') dateMap[attDate].h++;
-    else dateMap[attDate].t++;
-  });
-
-  const dates = Object.keys(dateMap).sort();
-  dates.forEach(date => {
-    chartData.labels.push(date);
-    chartData.hadir.push(dateMap[date].h);
-    chartData.tidakHadir.push(dateMap[date].t);
-  });
-
-  return { success: true, stats: stats, chartData: chartData };
+    return { success: true, stats: stats, chartData: chartData };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
 }
 
 function getReportData(token, filters) {

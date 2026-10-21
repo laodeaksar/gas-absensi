@@ -123,7 +123,7 @@ function getPublicSettings() {
 // Semua pengguna yang sudah login (dipakai untuk kop & tanda tangan cetak)
 function getSettings(token) {
   try {
-    requireAuth(token, false, true);
+    requireAuth(token, false, true, true)
     return { success: true, settings: getSettingsMap() };
   } catch (e) {
     return { success: false, message: e.message };
@@ -155,7 +155,7 @@ function saveSettings(token, data) {
 function changePassword(token, oldPassword, newPassword) {
   let user;
   try {
-    user = requireAuth(token, false, true);
+    user = requireAuth(token, false, true, true);
     oldPassword = String(oldPassword || '');
     newPassword = String(newPassword || '');
     if (!oldPassword) throw new Error("Password lama wajib diisi.");
@@ -195,13 +195,18 @@ function changePassword(token, oldPassword, newPassword) {
 
 // Dipanggil dari submitAttendanceBatch: guru dibatasi sesuai edit_window_days
 function assertAttendanceEditable(user, date) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw new Error("Format tanggal tidak valid.");
+  const s = String(date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error("Format tanggal tidak valid.");
+  const parsed = new Date(s + 'T00:00:00');
+  if (isNaN(parsed) || Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'yyyy-MM-dd') !== s) {
+    throw new Error("Tanggal tidak valid.");
+  }
   if (!user || user.role === 'admin') return;
 
-  const days = Number(getSettingsMap().edit_window_days) || 0;
-  if (days <= 0) return;
+  if (s > todayStr(0)) throw new Error("Tidak dapat mengisi absensi untuk tanggal yang akan datang.");
 
-  if (String(date) < todayStr(-days)) {
-    throw new Error("Absensi tanggal " + date + " sudah dikunci. Guru hanya dapat mengisi atau mengubah absensi maksimal " + days + " hari ke belakang.");
+  const days = Number(getSettingsMap().edit_window_days) || 0;
+  if (days > 0 && s < todayStr(-days)) {
+    throw new Error("Absensi tanggal " + s + " sudah dikunci. Guru hanya dapat mengisi atau mengubah absensi maksimal " + days + " hari ke belakang.");
   }
 }

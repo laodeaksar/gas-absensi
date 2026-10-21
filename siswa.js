@@ -118,17 +118,26 @@ function resetStudentAccount(token, studentId) {
     const existing = users.find(u => u.student_id === studentId);
 
     if (existing) {
+      if (!isTrue(student.is_active)) throw new Error("Siswa nonaktif. Aktifkan dulu sebelum mereset akun.");
+      const nis = String(student.nis || '').trim();
       const nisn = String(student.nisn || '').trim();
+      if (nis.length < 3) throw new Error("NIS siswa kosong atau terlalu pendek.");
       if (nisn.length < 6) throw new Error("NISN siswa kosong atau terlalu pendek untuk dijadikan password awal.");
+      if (users.some(u => u.user_id !== existing.user_id && String(u.username).toLowerCase() === nis.toLowerCase())) {
+        throw new Error("NIS sudah dipakai sebagai username akun lain.");
+      }
       const salt = generateUniqueId();
       updateRecord('Users', 'user_id', existing.user_id, {
+        username: nis,
+        full_name: student.full_name || 'Siswa',
+        is_active: true,
         password_salt: salt,
         password_hash: hashPassword(nisn, salt),
         must_change_password: true,
         updated_at: now
       });
       CacheService.getScriptCache().put('revoke:' + existing.user_id, String(Date.now()), 21600);
-      return { success: true, message: "Password siswa direset ke NISN." };
+      return { success: true, message: "Akun siswa direset: username = NIS, password = NISN." };
     }
 
     const taken = {};
